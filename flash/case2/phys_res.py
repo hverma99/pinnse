@@ -33,7 +33,7 @@ class Physics:
         z_i = torch.cat(
             [
                 Denormalization.min_max_col(
-                    x[:, 2 + i : 3 + i], f"Z_{sp}", self.I_S_metrics
+                    x[:, 5 + i : 6 + i], f"Z_{sp}", self.I_S_metrics
                 )
                 for i, sp in enumerate(self.species)
             ],
