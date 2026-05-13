@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from pinnse import ANN
-from utils import Normalization, Denormalization, Analyze
+from pinnse import Normalization, Analyze, Denormalization
 from data_gen import D_S_samples
 
 
