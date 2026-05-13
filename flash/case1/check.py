@@ -198,6 +198,7 @@ def plot_profiles(
         ax2.tick_params(
             axis="y", which="major", labelsize=fontsize, labelfontfamily=fontfamily
         )
+        ax2.set_ylim(top=0.8, bottom=0.4)
         ax2.yaxis.set_major_locator(MultipleLocator(0.1))
         ax2.spines["right"].set_color(right_axis_color)
         ax2.yaxis.label.set_color(right_axis_color)
@@ -385,6 +386,7 @@ def plot_profiles(
             fontsize=fontsize,
             fontfamily=fontfamily,
         )
+        ax2.set_ylim(top=0.8, bottom=0.4)
         ax2.tick_params(
             axis="y", which="major", labelsize=fontsize, labelfontfamily=fontfamily
         )

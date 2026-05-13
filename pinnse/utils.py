@@ -419,7 +419,9 @@ class Analyze:
         D_S_pred : pd.DataFrame
             Denormalized model predictions.
         """
-        I_S_model_norm = Normalization.min_max_defined_metrics(I_S_model, I_S_metrics)
+        I_S_model_norm = Normalization.scale_centered_defined_metrics(
+            I_S_model, I_S_metrics
+        )
         x = torch.tensor(I_S_model_norm.to_numpy(), dtype=torch.float32).to(device)
 
         with torch.no_grad():
