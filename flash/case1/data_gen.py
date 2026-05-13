@@ -260,6 +260,10 @@ if __name__ == "__main__":
     I_S = I_S_samples()
     D_S = D_S_samples(I_S)
 
+    valid_idx = D_S["case_id"].to_numpy()
+    I_S = I_S.iloc[valid_idx].reset_index(True)
+    D_S = D_S.reset_index(drop=True)
+
     I_S_data = I_S[["T_flash", "P_flash", *(f"Z_{c}" for c in components)]]
     D_S_data = D_S[
         ["VF", *(f"Y_{c}" for c in components), *(f"X_{c}" for c in components)]

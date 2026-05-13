@@ -199,8 +199,8 @@ class Training(object):
     def validate_test(
         self,
         loader: torch.utils.data.DataLoader,
-        phys_colloc_frac: float = 0.1,
-        bnd_colloc_frac: float = 0.1,
+        phys_colloc_frac: float = 0.25,
+        bnd_colloc_frac: float = 0.25,
     ):
         self.model.eval()
 
@@ -335,9 +335,7 @@ class Training(object):
 
             if epoch % val_every == 0:
 
-                val_data, val_phys, val_bnd = self.validate_test(
-                    loader=self.val_loader, phys_colloc_frac=0.1
-                )
+                val_data, val_phys, val_bnd = self.validate_test(loader=self.val_loader)
                 val_total = (
                     val_data + self.phys_weight * val_phys + self.bnd_weight * val_bnd
                 )
@@ -372,9 +370,7 @@ class Training(object):
 
         ckpt = torch.load(self.ckpt_path, map_location=self.device)
         self.model.load_state_dict(ckpt["model_state_dict"])
-        test_data, test_phys, test_bnd = self.validate_test(
-            loader=self.test_loader, phys_colloc_frac=0.1
-        )
+        test_data, test_phys, test_bnd = self.validate_test(loader=self.test_loader)
         test_total = (
             test_data + self.phys_weight * test_phys + self.bnd_weight * test_bnd
         )
