@@ -1,0 +1,131 @@
+import numpy as np
+from scipy.integrate import solve_ivp
+
+
+class ERM:
+    """
+    Isothermal PFR model in extent of reaction-based formulation (ERM).
+
+    This module defines a first-principles plug-flow reactor model in which the
+    extent of reactions are the state variables. The model evaluates reaction
+    rates using Arrhenius kinetics and solves the species material balances along
+    the reactor volume coordinate.
+    """
+
+    def __init__(
+        self,
+        species: list[str],
+        nu: np.ndarray,
+        key_species: list[str],
+        k: np.ndarray,
+        E: np.ndarray,
+        F_in: np.ndarray,
+        P: float,
+        T: float,
+        R: float = 8.314,
+    ):
+        """
+        Inputs
+        ------
+        species : list[str]
+            Species names in the reactor model.
+        nu : np.ndarray
+            Stoichiometric coefficient matrix of shape (n_reactions, n_species).
+        key_species : list[str]
+            Key reactant species used in the rate expressions for each reaction.
+        k : np.ndarray
+            Pre-exponential factors for each reaction (in 1/s).
+        E : np.ndarray
+            Activation energies for each reaction (in J/mol).
+        F_in : np.ndarray
+            Inlet species molar flowrates (in mol/s).
+        P : float
+            Reactor pressure (in Pa).
+        T : float
+            Reactor temperature (in K).
+        R : float, optional, default=8.314
+            Gas constant (in J/mol/K).
+
+        """
+        self.species = species
+        self.nu = nu
+        self.key_species = key_species
+        self.k = k
+        self.E = E
+        self.F_in = F_in
+        self.P = P
+        self.T = T
+        self.R = R
+
+        self.nr, self.ns = self.nu.shape
+        self.spec_index = {s: i for i, s in enumerate(self.species)}
+
+    def mat_balance(self, V, E_j):
+        """
+        Evaluate the species material-balance equations.
+
+        Inputs
+        ------
+        V : float
+            Reactor volume coordinate (in m3).
+        E_j : np.ndarray
+            Reaction extents at volume V (in mol/s).
+
+        Returns
+        -------
+        dEdV : np.ndarray
+            Derivative of extent of reactions with respect to reactor volume (in mol/s/m3).
+        """
+        F = self.F_in + self.nu.T @ E_j
+        F_tot = F.sum()
+
+        r_dim = np.zeros(self.nr)
+        for j in range(self.nr):
+            key = self.key_species[j]
+            i_key = self.spec_index[key]
+            nu_key = self.nu[j, i_key]
+            y_key = F[i_key] / F_tot
+            C_key = (self.P / (self.R * self.T)) * y_key
+
+            r_star = (
+                self.k[j]
+                * np.exp(-self.E[j] / (self.R * self.T))
+                * (C_key ** abs(nu_key))
+            )
+            r_dim[j] = r_star / (-nu_key)
+
+        dEdV = r_dim
+        return dEdV
+
+    def solve(self, V_end, V_eval=None, rtol=1e-12, atol=1e-12):
+        """
+        Solve the PFR model from inlet to reactor volume V.
+
+        Inputs
+        ------
+        V_end : float
+            Final reactor volume.
+        V_eval: np.ndarry
+            Evaluation reactor volume coordinates.
+        rtol : float, optional, default=1e-12
+            Relative tolerance for the ODE solver.
+        atol : float, optional, default=1e-12
+            Absolute tolerance for the ODE solver.
+
+        Returns
+        -------
+        E_j : np.ndarray
+            extent of reactions at the reactor outlet (in mol/s).
+        """
+        E_j0 = np.zeros(self.nr)
+        sol = solve_ivp(
+            self.mat_balance,
+            (0.0, V_end),
+            E_j0,
+            t_eval=V_eval,
+            rtol=rtol,
+            atol=atol,
+            dense_output=True,
+        )
+        E_j = sol
+        return E_j
