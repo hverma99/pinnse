@@ -215,6 +215,92 @@ class Normalization:
             I_S_norm[col] = Normalization.scale_centered(I_S, col, cmin, cmax)
         return I_S_norm
 
+    @staticmethod
+    def max_abs(data: pd.DataFrame, normalize_cols: list[str] | None = None):
+        """
+        Max-abs normalize only selected columns.
+
+        Inputs
+        ------
+        data : pd.DataFrame
+            Input DataFrame.
+        normalize_cols : list[str], optional
+            Columns to normalize. If None, all columns are normalized.
+
+        Returns
+        -------
+        data_norm : pd.DataFrame
+            DataFrame with selected columns normalized.
+        metrics : dict
+            Dictionary of max absolute values for normalized columns only.
+        """
+        data_norm, metrics = data.copy(), {}
+        cols = normalize_cols if normalize_cols is not None else list(data.columns)
+        for col in cols:
+            cmax = abs(data[col]).max()
+            data_norm[col] = data[col] / cmax
+            metrics[col] = {"max": float(cmax)}
+        return data_norm, metrics
+
+    @staticmethod
+    def mean_norm(data: pd.DataFrame, normalize_cols: list[str] | None = None):
+        """
+        Mean normalize only selected columns.
+
+        Inputs
+        ------
+        data : pd.DataFrame
+            Input DataFrame.
+        normalize_cols : list[str], optional
+            Columns to normalize. If None, all columns are normalized.
+
+        Returns
+        -------
+        data_norm : pd.DataFrame
+            DataFrame with selected columns normalized.
+        metrics : dict
+            Dictionary of mean, max, and min values for normalized columns only.
+        """
+        data_norm, metrics = data.copy(), {}
+        cols = normalize_cols if normalize_cols is not None else list(data.columns)
+        for col in cols:
+            cmin, cmax = data[col].min(), data[col].max()
+            cmean = data[col].mean()
+            data_norm[col] = (data[col] - cmean) / (cmax - cmin)
+            metrics[col] = {
+                "max": float(cmax),
+                "min": float(cmin),
+                "mean": float(cmean),
+            }
+        return data_norm, metrics
+
+    @staticmethod
+    def z_score(data: pd.DataFrame, normalize_cols: list[str] | None = None):
+        """
+        Z-score normalization of only selected columns.
+
+        Inputs
+        ------
+        data : pd.DataFrame
+            Input DataFrame.
+        normalize_cols : list[str], optional
+            Columns to normalize. If None, all columns are normalized.
+
+        Returns
+        -------
+        data_norm : pd.DataFrame
+            DataFrame with selected columns normalized.
+        metrics : dict
+            Dictionary of mean and standard deviation values for normalized columns only.
+        """
+        data_norm, metrics = data.copy(), {}
+        cols = normalize_cols if normalize_cols is not None else list(data.columns)
+        for col in cols:
+            cmean, cstd = data[col].mean(), data[col].std()
+            data_norm[col] = (data[col] - cmean) * cstd
+            metrics[col] = {"mean": float(cmean), "std": float(cstd)}
+        return data_norm, metrics
+
 
 class Denormalization:
     @staticmethod
@@ -303,6 +389,94 @@ class Denormalization:
         )
         X_dim = mins.view(1, k) + 0.5 * (X + 1.0) * rngs.view(1, k)
         return X_dim, rngs
+
+    @staticmethod
+    def max_abs(data_norm, metrics):
+        """
+        Inverse of max_abs normalization
+        z = z_norm * max(abs(z))
+
+        Inputs
+        ------
+        data_norm : pd.DataFrame (Normalized DataFrame)
+
+        metrics : dict
+                Dictionary of the form:
+                {column: {"max": ...}}
+
+        Returns
+        -------
+        data : pd.DataFrame (Denormalized DataFrame)
+        """
+        data = data_norm.copy()
+        if not metrics:
+            return data
+
+        for col in data.columns:
+            if col not in metrics:
+                continue
+            cmax = metrics[col]["max"]
+            data[col] = data[col] * cmax
+        return data
+
+    @staticmethod
+    def mean_abs(data_norm, metrics):
+        """
+        Inverse of mean normalization
+        z = z_norm * (z_max - z_min) + z_mean
+
+        Inputs
+        ------
+        data_norm : pd.DataFrame (Normalized DataFrame)
+
+        metrics : dict
+                Dictionary of the form:
+                {column: {"min": ..., "max": ..., "mean":...}}
+
+        Returns
+        -------
+        data : pd.DataFrame (Denormalized DataFrame)
+        """
+        data = data_norm.copy()
+        if not metrics:
+            return data
+
+        for col in data.columns:
+            if col not in metrics:
+                continue
+            cmin, cmax = metrics[col]["min"], metrics[col]["max"]
+            cmean = metrics[col]["mean"]
+            data[col] = data[col] * (cmax - cmin) + cmean
+        return data
+
+    @staticmethod
+    def z_norm(data_norm, metrics):
+        """
+        Inverse of Z-score normalization
+        z = z_norm * z_std + z_mean
+
+        Inputs
+        ------
+        data_norm : pd.DataFrame (Normalized DataFrame)
+
+        metrics : dict
+                Dictionary of the form:
+                {column: {"mean": ..., "std":...}}
+
+        Returns
+        -------
+        data : pd.DataFrame (Denormalized DataFrame)
+        """
+        data = data_norm.copy()
+        if not metrics:
+            return data
+
+        for col in data.columns:
+            if col not in metrics:
+                continue
+            cmean, cstd = metrics[col]["mean"], metrics[col]["std"]
+            data[col] = data[col] * cstd + cmean
+        return data
 
 
 class Analyze:
