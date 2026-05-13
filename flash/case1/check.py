@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from pinnse import Normalization, Analyze, Denormalization
+from pinnse import Normalization, Analyze
 from data_gen import D_S_samples
 
 

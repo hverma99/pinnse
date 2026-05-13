@@ -1,7 +1,7 @@
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import torch, torch.nn as nn, numpy as np, pandas as pd
+import torch, torch.nn as nn, pandas as pd
 from pinnse import Normalization, Save
 from pinnse import DataModule
 from pinnse import ANN
