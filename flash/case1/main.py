@@ -6,8 +6,8 @@ from pinnse import Normalization, Save
 from pinnse import DataModule
 from pinnse import ANN
 from pinnse import Training
-from phys_res import Physics
 from pinnse import Plotter
+from phys_res import Physics
 
 
 def main():
