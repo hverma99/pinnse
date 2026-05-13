@@ -1,7 +1,7 @@
 from typing import Any
 
 import torch
-from utils import Denormalization
+from pinnse import Denormalization
 
 
 class Physics:

@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from utils import Denormalization
+from pinnse import Denormalization
 
 
 class Physics:

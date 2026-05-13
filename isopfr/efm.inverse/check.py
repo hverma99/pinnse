@@ -12,7 +12,7 @@ from matplotlib.lines import Line2D
 from data_gen import species, nu, key_species, k, E
 from pfr_model import EFM
 from phys_res import Physics
-from utils import Normalization, Analyze
+from pinnse import Normalization, Analyze
 
 
 def build_profile_inputs(
