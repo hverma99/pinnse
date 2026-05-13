@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=82.0.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Project settings -----------------------------------------------------------------------------------------------------
+[project]
+name = "pinnse"  # Required
+version = "0.0.1"
+description = "description"  # Optional
+readme = "README.md"  # Optional
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["PINNs", "PSE", "PINN"]  # Optional
+authors = [
+    { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
+]
+maintainers = [
+    { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
+]
+
+# Required dependencies ------------------------------------------------------------------------------------------------
+dependencies = [
+    "numpy", "scipy", "torch", "pandas", "tqdm"
+]
+
+[project.urls]  # Optional
+"Paper" = "https://ultralytics.com"
+
+[tool.setuptools.packages.find]
+where = ["."]
