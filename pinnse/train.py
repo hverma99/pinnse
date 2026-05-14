@@ -361,11 +361,15 @@ class Training(object):
                 if self.theta is not None:
                     inv_param.append(self.theta.detach().cpu().numpy().copy())
 
-                if self.scheduler is not None:
-                    if isinstance(self.scheduler, ReduceLROnPlateau):
-                        self.scheduler.step(val_total)
-                    else:
-                        self.scheduler.step()
+                if self.scheduler is not None and isinstance(
+                    self.scheduler, ReduceLROnPlateau
+                ):
+                    self.scheduler.step(val_total)
+
+            if self.scheduler is not None and not isinstance(
+                self.scheduler, ReduceLROnPlateau
+            ):
+                self.scheduler.step()
         pbar.close()
 
         ckpt = torch.load(self.ckpt_path, map_location=self.device)

@@ -190,7 +190,7 @@ class Normalization:
                 if f"X_R{j+1}" in D_S_data.columns
             ]
 
-            Normalization.apply_global(
+            Normalization.apply_local(
                 I_S_data, norm_I_S_data, norm_I_S_metrics, in_cols
             )
             Normalization.apply_local(
