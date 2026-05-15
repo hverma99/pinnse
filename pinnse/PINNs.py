@@ -63,6 +63,54 @@ class ANN(nn.Module):
         return self.net(x)
 
 
+class SANN(nn.Module):
+    """
+    Standard fully connected feedforward neural network with softplus output activation.
+
+    Inputs
+    ------
+    layer_size : list[int]
+        List specifying the size of each layer, including input and output
+        dimensions. For example, [dim_in, 64, 64, dim_out].
+
+    activation : type[nn.Module]
+        PyTorch activation class used after each hidden linear layer,
+        e.g. `nn.Tanh`, `nn.ReLU`, or `nn.Sigmoid`.
+
+    Returns
+    -------
+    torch.Tensor
+        Predicted output tensor of shape `(batch_size, dim_out)`.
+
+    Notes
+    -----
+    - All linear-layer weights are initialized using Xavier uniform
+      initialization, and biases are initialized to zero.
+    """
+
+    def __init__(self, layer_size: list[int], activation: type[nn.Module]):
+        super().__init__()
+
+        layers = []
+
+        for i in range(len(layer_size) - 2):
+            layers.append(nn.Linear(layer_size[i], layer_size[i + 1]))
+            layers.append(activation())
+
+        layers.append(nn.Linear(layer_size[-2], layer_size[-1]))
+        self.net = nn.Sequential(*layers)
+        self.softplus = nn.Softplus()
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        raw_output = self.net(x)
+        return self.softplus(raw_output)
+
+
 class BranchedANN(nn.Module):
     """
     Branched feedforward neural network with a shared trunk and multiple heads.
