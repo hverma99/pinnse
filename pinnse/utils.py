@@ -657,7 +657,9 @@ class Analyze:
 
 class Save:
     @staticmethod
-    def excel(history: dict, foldername: str = "logs"):
+    def excel(
+        history: dict, foldername: str = "logs", filename: str = "training_history.xlsx"
+    ):
         """
         Save the training history dictionary to a multi-sheet Excel file.
 
@@ -667,14 +669,16 @@ class Save:
             Dictionary containing training-history items.
         foldername : str, optional, default="logs"
             Folder in which the Excel file is saved.
+        filename : str, optional, default="training_history.xlsx"
+        Filename.
 
         Returns
         -------
         None
-            Writes `training_history.xlsx` to the specified folder.
+            Writes XLSX file to `<foldername>/<filename>/`.
         """
         os.makedirs(foldername, exist_ok=True)
-        filepath = os.path.join(foldername, "training_history.xlsx")
+        filepath = os.path.join(foldername, filename)
 
         with pd.ExcelWriter(filepath) as writer:
             for key, value in history.items():
@@ -694,7 +698,7 @@ class Save:
         print(f"Saved training history XLSX files to folder: {filepath}")
 
     @staticmethod
-    def csv(history: dict, foldername: str = "logs"):
+    def csv(history: dict, foldername: str = "logs", filename: str = "csv_files"):
         """
         Save the training history dictionary as multiple CSV files.
 
@@ -704,13 +708,15 @@ class Save:
             Dictionary containing training-history items.
         foldername : str, optional, default="logs"
             Parent folder in which the CSV files are saved.
+        filename : str, optional, default="csv_files"
+            Filename.
 
         Returns
         -------
         None
-            Writes one CSV file per history item to `logs/csv_files/`.
+            Writes one CSV file per history item to `<foldername>/<filename>/`.
         """
-        foldername = os.path.join(foldername, "csv_files")
+        foldername = os.path.join(foldername, filename)
         os.makedirs(foldername, exist_ok=True)
         for key, value in history.items():
             if value is None:
