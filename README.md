@@ -1,52 +1,45 @@
-# pinnse: physics-informed neural networks for process systems engineering
+<p align="center">
+  <img src="docs/pinnse_logo.png" alt="pinnse logo" width="1000">
+</p>
+
+# pinnse: Physics-informed neural networks for process systems engineering
 
 ![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
 ![pytorch](https://img.shields.io/badge/PyTorch-enabled-ee4c2c)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-`pinnse` is a modular, PyTorch-based framework for building physics-informed neural-network (PINN) surrogate models for chemical process modelling, simulation and process systems engineering. The package separates process-specific information—operating bounds, governing equations, input-output representations and residual definitions—from reusable infrastructure for data handling, normalization, neural-network construction, training, validation, testing and visualization.
+`pinnse` is a modular PyTorch framework for the development of physics-informed neural-network (PINN) surrogate models for chemical process modelling, simulation, and process systems engineering. The package separates process-specific ingredients—such as operating bounds, governing equations, input-output formulations, and residual definitions—from reusable learning infrastructure for data handling, normalization, neural-network construction, training, validation, testing, and visualization.
 
-The repository includes representative case studies for nonideal flash separation, isothermal plug-flow reactors under multiple surrogate formulations, inverse PINNs for parameter estimation and a nonisothermal plug-flow reactor with coupled mass and energy balances.
+The repository currently includes representative examples for nonideal flash separation, isothermal plug-flow reactors under multiple surrogate formulations, inverse PINNs for parameter estimation, and a nonisothermal plug-flow reactor with coupled mass and energy balances.
 
 <p align="center">
-  <img src="docs/framework_overview.png" alt="pinnse framework overview" width="900">
+  <img src="docs/framework_overview.png" alt="pinnse framework overview" width="950">
 </p>
+
+At its core, `pinnse` follows a simple idea: define the process physics once, expose it through residual functions, and train a differentiable surrogate against both labelled data and physical constraints. The resulting models remain data-efficient, physically informed, and suitable for downstream use in simulation, design analysis, and optimization-oriented workflows.
 
 ---
 
 ## Contents
 
-- [Overview](#overview)
+- [Why pinnse?](#why-pinnse)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Framework design](#framework-design)
-- [Package anatomy](#package-anatomy)
+- [Framework workflow](#framework-workflow)
+- [Core package](#core-package)
 - [Example case studies](#example-case-studies)
-- [Building a new process model](#building-a-new-process-model)
-- [Outputs](#outputs)
 - [Repository structure](#repository-structure)
-- [Citation](#citation)
+- [Extending pinnse](#extending-pinnse)
+- [Outputs](#outputs)
 - [License](#license)
-- [Contact](#contact)
 
 ---
 
-## Overview
+## Why pinnse?
 
-First-principles models in chemical engineering are often nonlinear, coupled and expensive to solve repeatedly. Data-driven surrogates can accelerate simulation and design, but they may violate conservation laws, equilibrium relationships or boundary conditions. `pinnse` addresses this gap by training differentiable neural surrogates against both labelled data and residuals derived from governing equations.
+First-principles models in chemical engineering are often nonlinear, tightly coupled, and costly to solve repeatedly. Conventional surrogate models can reduce this cost, but purely data-driven surrogates may violate conservation laws, equilibrium constraints, or boundary conditions. `pinnse` addresses this limitation by combining labelled simulator or solver data with residual losses derived from the governing equations.
 
-The framework is intended for process systems engineering applications in which the same physical system may admit multiple useful surrogate formulations. For example, a plug-flow reactor can be represented through effluent flows, reaction extents or conversions. `pinnse` keeps such formulation-specific choices local to each example directory, while reusing the same package-level machinery for data loading, collocation sampling, model construction, optimization and post-processing.
-
-`pinnse` provides:
-
-- supervised and physics-informed training workflows;
-- interior and boundary collocation sampling;
-- formulation-aware normalization utilities;
-- fully connected, softplus-output, branched and Fourier-feature neural architectures;
-- Adam and optional LBFGS optimization;
-- adaptive physics and boundary loss weighting;
-- support for inverse PINNs through trainable physical parameters;
-- training diagnostics, checkpointing, history export and plotting utilities.
+The framework is designed for process systems engineering settings in which a single unit operation may admit multiple surrogate formulations. For example, a plug-flow reactor may be represented in terms of effluent flowrates, reaction extents, or conversions. In `pinnse`, such formulation-specific choices are localized within each example, while the common infrastructure for data preparation, normalization, model training, and analysis is reused across cases.
 
 ---
 
@@ -68,25 +61,34 @@ conda activate pinnse
 python -m pip install -e .
 ```
 
-The package uses `numpy`, `scipy`, `torch`, `pandas` and `tqdm`. The data loader and example workflows also require:
+The core package depends on:
+
+- `numpy`
+- `scipy`
+- `torch`
+- `pandas`
+- `tqdm`
+
+The example workflows and plotting utilities also use:
 
 ```bash
-python -m pip install scikit-learn matplotlib openpyxl
+python -m pip install matplotlib scikit-learn openpyxl
 ```
 
-Flash data generation through Aspen Plus requires Windows, Aspen Plus and COM automation:
+For flash-data generation through Aspen Plus, the following are additionally required:
 
 ```bash
 python -m pip install pywin32
 ```
 
-Training the supplied examples from the included `.xlsx` datasets does not require Aspen Plus.
+> **Note**
+> Training from the supplied `.xlsx` datasets does **not** require Aspen Plus. Aspen is only needed when regenerating flash datasets or running Aspen-based workflows.
 
 ---
 
 ## Quick start
 
-The isothermal PFR examples are the recommended entry point because they use a SciPy-based process model and do not require Aspen Plus. From the repository root:
+The isothermal PFR examples are the most direct entry point because they do not depend on Aspen Plus.
 
 ```bash
 cd examples/isopfr/efm
@@ -94,64 +96,76 @@ python main.py
 python check.py
 ```
 
-A standard run:
+A standard run performs the following steps:
 
-1. reads `I_S_data.xlsx` and `D_S_data.xlsx`;
-2. normalizes the input and output spaces;
-3. builds labelled, physics-collocation and boundary-collocation data loaders;
-4. constructs a neural surrogate;
-5. trains the model using data, physics and boundary losses;
-6. saves the best checkpoint to `logs/best_model.pth`;
-7. exports training histories to `logs/`; and
-8. generates diagnostic and comparison figures.
+1. loads `I_S_data.xlsx` and `D_S_data.xlsx`,
+2. normalizes the input and output spaces,
+3. constructs supervised, physics-collocation, and boundary-collocation loaders,
+4. builds a PINN surrogate model,
+5. trains against data and residual losses,
+6. stores the best checkpoint in `logs/`, and
+7. evaluates the trained model through `check.py`.
 
-For a short smoke test, reduce the number of epochs in `main.py` before running the script.
+The nonisothermal PFR example follows the same pattern:
+
+```bash
+cd examples/nonisopfr
+python main.py
+python check.py
+```
+
+Flash examples can be trained from the supplied datasets:
+
+```bash
+cd examples/flash/case1
+python main.py
+```
 
 ---
 
-## Framework design
+## Framework workflow
 
-`pinnse` trains a neural surrogate by minimizing the composite objective
+`pinnse` implements a composite PINN objective of the form
 
 ```math
 \mathcal{L}_{\mathrm{total}}
 = \mathcal{L}_{\mathrm{data}}
-+ \lambda_P \mathcal{L}_{\mathrm{physics}}
-+ \lambda_B \mathcal{L}_{\mathrm{boundary}},
++ \lambda_P\,\mathcal{L}_{\mathrm{physics}}
++ \lambda_B\,\mathcal{L}_{\mathrm{boundary}},
 ```
 
-where the data loss fits labelled input-output pairs, the physics loss penalizes governing-equation residuals at interior collocation points and the boundary loss enforces initial or boundary constraints.
+where the data loss fits labelled samples, the physics loss penalizes residual violations at collocation points, and the boundary loss enforces boundary or initial conditions.
 
-The workflow shown in the figure is implemented through a small number of reusable modules:
+The figure above summarizes the workflow implemented in the repository:
 
 | Stage | Purpose | Typical file |
 |---|---|---|
-| Framework initialization | Defines process specifications, physical parameters, input-output variables, training settings and model hyperparameters. | `main.py` |
-| Data generation and sampling | Generates labelled data from Aspen Plus, SciPy solvers or other process models. | `data_gen.py` |
-| Data loading | Splits labelled data and constructs supervised, physics-collocation and boundary-collocation loaders. | `pinnse/data.py` |
-| Neural architecture | Defines the differentiable surrogate model. | `pinnse/PINNs.py` |
-| Physics residual formulation | Converts normalized variables to physical variables and evaluates residual tensors. | `phys_res.py` |
-| Training, validation and testing | Optimizes the network, evaluates validation and test losses, and stores the best checkpoint. | `pinnse/train.py` |
-| Post-processing | Reloads trained models, compares predictions against process-model results and generates figures. | `check.py`, `pinnse/utils.py`, `pinnse/plots.py` |
+| **Framework initialization** | Defines the process variables, operating bounds, model formulation, network architecture, dataset sizes, optimizer, scheduler, and loss weights. | `main.py` |
+| **Data generation and sampling** | Generates labelled data from Aspen Plus, SciPy-based solvers, or process models, and prepares the sampled input-output space. | `data_gen.py` |
+| **Data loading** | Splits the labelled data and constructs supervised, physics-collocation, and boundary-collocation data loaders. | `pinnse/data.py` |
+| **PINN architecture** | Defines the differentiable neural-network surrogate. | `pinnse/PINNs.py` |
+| **Physics residual formulation** | Encodes the governing equations in residual form and evaluates them on collocation batches. | `phys_res.py` |
+| **Training, validation, and testing** | Optimizes the surrogate, monitors validation performance, checkpoints the best model, and records loss histories. | `pinnse/train.py` |
+| **Post-processing and analysis** | Evaluates trained models, denormalizes outputs, computes errors, and generates figures. | `check.py`, `pinnse/utils.py`, `pinnse/plots.py` |
 
 ---
 
-## Package anatomy
+## Core package
 
-The reusable source code is contained in `pinnse/`. These modules are independent of any specific unit operation.
+The reusable framework is implemented in the `pinnse/` package.
 
 ### `pinnse/PINNs.py`
 
-Defines neural-network architectures with a common PyTorch interface.
+This module defines the neural-network architectures used as PINN surrogates.
 
-| Object | Role |
+| Class | Role |
 |---|---|
-| `ANN(layer_size, activation)` | Fully connected feedforward network with Xavier-uniform weights and zero biases. This is the default surrogate architecture in most examples. |
-| `SANN(layer_size, activation)` | Fully connected network with a `Softplus` output activation. This is useful when dependent variables must remain non-negative. |
-| `BranchedANN(in_dim, trunk_layers, head_dims, activation)` | Shared-trunk network with multiple output heads, useful when related output groups benefit from separate prediction heads. |
-| `Fourier_ANN(layer_size, activation, fourier_levels, positive_output)` | Feedforward network with Fourier features applied to the last input coordinate, useful for strongly varying or spatially structured mappings. |
+| `ANN` | Standard fully connected feedforward network with Xavier-uniform weight initialization and zero biases. |
+| `SANN` | Feedforward network with a `Softplus` output layer, useful when outputs must remain non-negative. |
+| `BranchedANN` | Shared-trunk architecture with multiple output heads for structured multi-output regression. |
+| `Fourier_ANN` | Feedforward architecture with Fourier feature embedding, useful for strongly varying or oscillatory mappings. |
 
-Example:
+Minimal example:
 
 ```python
 import torch.nn as nn
@@ -163,107 +177,56 @@ model = ANN(layer_size=layer_size, activation=nn.Tanh)
 
 ### `pinnse/data.py`
 
-Provides `DataModule`, which converts normalized `pandas.DataFrame` objects into PyTorch data loaders.
+This module provides `DataModule`, which converts normalized `pandas.DataFrame` objects into PyTorch data loaders.
 
-| Method | Role |
-|---|---|
-| `labeled_data_loader()` | Splits labelled input-output data into training, validation and test loaders. It also stores input bounds used for collocation sampling. |
-| `phys_colloc_loader()` | Samples interior collocation points over the input domain. Ordinary bounded variables are sampled by Latin hypercube sampling; composition groups beginning with `Z_`, `X_` or `Y_` are sampled from Dirichlet distributions. |
-| `bnd_colloc_loader()` | Samples boundary points by fixing the last input column to a prescribed normalized boundary value and sampling the remaining variables over their bounds. |
-| `inspect_loader()` | Prints tensor shapes and batch counts for debugging. |
-| `save_loaders()` | Exports loader contents to Excel for inspection. |
+Key capabilities include:
 
-Typical use:
+- supervised train/validation/test splits through `labeled_data_loader()`,
+- physics-collocation sampling through `phys_colloc_loader()`,
+- boundary-collocation sampling through `bnd_colloc_loader()`,
+- data-loader inspection and export utilities.
 
-```python
-from pinnse import DataModule
-
-data = DataModule(
-    I_S_data=norm_I_S_data,
-    D_S_data=norm_D_S_data,
-    labeled_data_batch_size=500,
-    physics_coll_data_size=20000,
-    physics_coll_batch_size=500,
-    boundary_coll_data_size=5000,
-    boundry_coll_batch_size=1000,
-    test_frac=0.1,
-    val_frac=0.1,
-)
-
-train_loader, val_loader, test_loader = data.labeled_data_loader()
-phys_coll_loader = data.phys_colloc_loader()
-bnd_coll_loader = data.bnd_colloc_loader()
-```
+Notably, `phys_colloc_loader()` samples the interior input space using Latin hypercube sampling, while composition variables with prefixes such as `Z_`, `X_`, or `Y_` are sampled with Dirichlet distributions so that the resulting composition groups remain physically meaningful.
 
 ### `pinnse/train.py`
 
-Provides `Training`, the main optimization class. It combines data loss, optional physics-residual loss and optional boundary-residual loss.
+This module implements the `Training` class, which couples supervised data loss with optional physics and boundary residual losses.
 
-| Method or feature | Role |
-|---|---|
-| `train_epoch()` | Performs one training epoch over labelled batches while cycling through physics and boundary collocation batches. |
-| `validate_test()` | Evaluates data, physics and boundary losses on validation or test loaders. |
-| `adam_step(epochs, val_every)` | Runs Adam-based training, logs histories and checkpoints the model with the lowest validation total loss. |
-| `lbfgs_step(mode, N_LBFGS)` | Performs optional full-batch LBFGS refinement using data, physics, boundary, combined or overall-physics losses. |
-| `adapt_wts=True` | Updates physics and boundary weights by gradient-norm matching. |
-| `theta` | Allows trainable physical parameters to be optimized with the neural-network weights for inverse PINN problems. |
+Its functionality includes:
 
-Typical use:
-
-```python
-from pinnse import Training
-
-trainer = Training(
-    model=model,
-    train_loader=train_loader,
-    val_loader=val_loader,
-    test_loader=test_loader,
-    optimizer=optimizer,
-    loss_fn=loss_fn,
-    device=device,
-    phys_coll_loader=phys_coll_loader,
-    bnd_coll_loader=bnd_coll_loader,
-    phys_residual=physics,
-    bnd_residual=boundary,
-    ckpt_path="./logs/best_model.pth",
-    phys_weight=1.0,
-    bnd_weight=1.0,
-    adapt_wts=False,
-)
-
-history = trainer.adam_step(epochs=75000, val_every=100)
-```
+- epoch-wise training with `adam_step()`,
+- optional second-stage optimization with `lbfgs_step()`,
+- validation and testing through `validate_test()`,
+- checkpointing of the best model,
+- storage of training and validation loss histories,
+- gradient-norm tracking for data, physics, and boundary losses,
+- optional adaptive updating of loss weights.
 
 ### `pinnse/utils.py`
 
-Collects utilities for normalization, denormalization, evaluation and saving.
+This module provides common utilities for normalization, denormalization, result export, and post-training analysis.
 
-| Object | Role |
+| Class | Role |
 |---|---|
-| `Normalization` | Provides min-max scaling, max-absolute scaling, mean normalization, z-score normalization, centered `[-1, 1]` scaling and formulation-aware PFR normalization through `min_max_pfr`. |
-| `Denormalization` | Inverts the corresponding normalization operations and supports column-wise denormalization inside residual functions. |
-| `Analyze` | Loads trained checkpoints, evaluates PINN predictions and computes grouped error metrics such as MAE, RMSE and R². |
-| `Save` | Exports training histories to Excel workbooks or CSV files. |
-
-The PFR helper `Normalization.min_max_pfr(...)` implements formulation-aware scaling for effluent-flow, extent-of-reaction and conversion-based reactor models.
+| `Normalization` | Applies min-max, centred scaling, max-absolute, mean normalization, and z-score transformations. Includes routines specialized for PFR formulations. |
+| `Denormalization` | Maps normalized model predictions back to dimensional variables. |
+| `Analyze` | Loads trained models, evaluates predictions, and computes error metrics. |
+| `Save` | Writes histories or results to Excel or CSV. |
 
 ### `pinnse/plots.py`
 
-Provides `Plotter`, which converts training histories into diagnostic figures.
+This module defines the `Plotter` class for visualizing model-development history. It includes methods to plot:
 
-| Method | Role |
-|---|---|
-| `plot_individual_loss()` | Plots one training or validation loss history. |
-| `plot_all_train_losses()` | Plots total, data, physics and boundary training losses. |
-| `plot_all_val_losses()` | Plots total, data, physics and boundary validation losses. |
-| `plot_weights()` | Plots adaptive physics and boundary weights. |
-| `plot_gradient_history()` | Plots data, physics or boundary gradient norms. |
-| `plot_inverse_params()` | Plots learned inverse-parameter trajectories. |
-| `plot_everything()` | Saves all available diagnostic plots. |
+- individual loss histories,
+- full training and validation loss traces,
+- physics and boundary weight evolution,
+- gradient histories,
+- inverse-parameter trajectories, and
+- a combined summary view through `plot_everything()`.
 
 ### `pinnse/__init__.py`
 
-Exposes the public API:
+The package exports the main public API:
 
 ```python
 from pinnse import (
@@ -277,77 +240,26 @@ from pinnse import (
 
 ## Example case studies
 
-Each example directory contains process-specific files. The core package remains unchanged.
+The repository includes example workflows in `examples/`.
 
-| Directory | System and formulation | Main features |
-|---|---|---|
-| `examples/flash/case1` | Nonideal flash separation with flash temperature, flash pressure and feed composition as inputs. | Predicts vapor fraction and phase compositions; enforces component balance and phase-fraction constraints. |
-| `examples/flash/case2` | Extended nonideal flash separation with feed conditions and feed flow included. | Predicts vapor fraction, phase compositions and heat duty; uses Aspen-generated data. |
-| `examples/isopfr/efm` | Isothermal PFR, effluent-flow model. | Predicts species flows and enforces species-balance ODE residuals. |
-| `examples/isopfr/erm` | Isothermal PFR, extent-of-reaction model. | Predicts reaction extents and enforces extent-space residuals. |
-| `examples/isopfr/cm/s0` | Isothermal PFR, conversion model. | Predicts reaction conversions and enforces conversion-space residuals. |
-| `examples/isopfr/cm/s1` | Conversion model with a modified training schedule. | Demonstrates scheduler-based training for the same formulation. |
-| `examples/isopfr/efm.inverse` | Inverse PINN for the isothermal PFR. | Learns kinetic parameters jointly with the neural surrogate. |
-| `examples/nonisopfr` | Nonisothermal PFR with coupled mass and energy balances. | Uses `SANN`, physics and boundary losses, and optional LBFGS refinement. |
-
-Typical case-study files are:
-
-| File | Role |
+| Example | Description |
 |---|---|
-| `data_gen.py` | Generates labelled datasets from Aspen Plus, SciPy ODE solvers or other process models. |
-| `pfr_model.py` | Defines the first-principles PFR model used for data generation and validation. |
-| `phys_res.py` | Defines process-specific `Physics` and, when required, `Boundary` residual classes. |
-| `main.py` | Runs the complete training workflow. |
-| `check.py` | Reloads the trained model and compares predictions against first-principles or simulator results. |
-| `run.sh` | Optional shell script for running jobs on external compute resources. |
-| `I_S_data.xlsx` | Labelled independent-variable dataset. |
-| `D_S_data.xlsx` | Labelled dependent-variable dataset. |
+| `examples/flash/case1` | PINN workflow for a flash-separation formulation using supplied labelled data. |
+| `examples/flash/case2` | Alternative flash formulation with its own residual and training script. |
+| `examples/isopfr/efm` | Isothermal PFR using an effluent-flow formulation. |
+| `examples/isopfr/erm` | Isothermal PFR using an extent-of-reaction formulation. |
+| `examples/isopfr/efm.inverse` | Inverse PINN workflow for parameter estimation in the isothermal PFR setting. |
+| `examples/nonisopfr` | Nonisothermal PFR with coupled mass and energy balances. |
 
----
+A typical example directory contains:
 
-## Building a new process model
-
-A new chemical process can be added without modifying the source files in `pinnse/`.
-
-1. **Define the surrogate representation.** Select the independent variables `I_S` and dependent variables `D_S`. Include all variables required to evaluate the governing residuals.
-2. **Generate labelled data.** Write `data_gen.py` to sample the admissible input domain and evaluate a simulator, first-principles solver or experimental data source. Save `I_S_data.xlsx` and `D_S_data.xlsx`.
-3. **Normalize the variables.** Use `Normalization.min_max` for standard scaling or `Normalization.min_max_pfr` for formulation-aware PFR scaling.
-4. **Write residual classes.** In `phys_res.py`, define a callable `Physics` class with signature `physics(x, y) -> residuals`. Add a `Boundary` class when inlet, initial or boundary constraints are needed.
-5. **Construct loaders.** Use `DataModule` to create labelled, interior-collocation and boundary-collocation loaders. Prefix composition variables with `Z_`, `X_` or `Y_` when they should be sampled on a simplex.
-6. **Train the PINN.** Instantiate a model from `pinnse/PINNs.py`, construct a `Training` object and call `adam_step`. Use `lbfgs_step` for optional full-batch refinement.
-7. **Evaluate and report.** Use `Analyze`, `Save`, `Plotter` and a case-specific `check.py` script to compute errors and generate figures.
-
-A minimal residual class follows the pattern below:
-
-```python
-class Physics:
-    def __init__(self, I_S_metrics, D_S_metrics, *params):
-        self.I_S_metrics = I_S_metrics
-        self.D_S_metrics = D_S_metrics
-        self.params = params
-
-    def __call__(self, x, y):
-        # 1. Denormalize x and y if required.
-        # 2. Compute dimensional conservation, equilibrium or rate residuals.
-        # 3. Return a tensor of shape (batch_size, n_residuals).
-        return residuals
-```
-
-For derivative-based residuals, compute derivatives with PyTorch autograd. The `Training` class automatically sets `requires_grad_(True)` for physics and boundary collocation inputs.
-
----
-
-## Outputs
-
-Training and analysis scripts typically create:
-
-| Output | Description |
-|---|---|
-| `logs/best_model.pth` | Checkpoint with the lowest validation total loss. |
-| `logs/training_history.xlsx` | Multi-sheet workbook containing loss, gradient, weight and inverse-parameter histories. |
-| `logs/csv_files/` | CSV exports of the same histories. |
-| `figures/` | Training, validation, gradient, adaptive-weight and inverse-parameter plots. |
-| case-specific comparison figures | Parity plots, axial profiles, phase-composition plots or grouped error summaries generated by `check.py`. |
+- `main.py`: model setup and training script,
+- `phys_res.py`: physics and boundary residual definitions,
+- `data_gen.py`: dataset generation script,
+- `check.py`: post-training evaluation and comparison,
+- `I_S_data.xlsx`, `D_S_data.xlsx`: labelled input and output datasets,
+- `pfr_model.py`: process model helper functions where applicable,
+- `run.sh`: convenience shell script.
 
 ---
 
@@ -355,11 +267,20 @@ Training and analysis scripts typically create:
 
 ```text
 pinnse/
-├── README.md
-├── LICENSE
-├── pyproject.toml
 ├── docs/
-│   └── framework_overview.png
+│   ├── framework_overview.png
+│   └── pinnse_logo.png
+├── examples/
+│   ├── flash/
+│   │   ├── Aspen Simulations/
+│   │   ├── case1/
+│   │   └── case2/
+│   ├── isopfr/
+│   │   ├── efm/
+│   │   ├── erm/
+│   │   ├── efm.inverse/
+│   │   └── cm/
+│   └── nonisopfr/
 ├── pinnse/
 │   ├── __init__.py
 │   ├── PINNs.py
@@ -367,50 +288,43 @@ pinnse/
 │   ├── train.py
 │   ├── utils.py
 │   └── plots.py
-└── examples/
-    ├── flash/
-    │   ├── Aspen Simulations/
-    │   ├── case1/
-    │   └── case2/
-    ├── isopfr/
-    │   ├── efm/
-    │   ├── efm.inverse/
-    │   ├── erm/
-    │   └── cm/
-    │       ├── s0/
-    │       └── s1/
-    └── nonisopfr/
+├── pyproject.toml
+├── README.md
+└── LICENSE
 ```
 
 ---
 
-## Platform notes
+## Extending pinnse
 
-The package, PFR examples and training from existing `.xlsx` datasets are cross-platform. Flash data generation and Aspen-based validation require Windows and a licensed Aspen Plus installation with COM access.
+To apply `pinnse` to a new process system, the typical workflow is:
 
-GPU acceleration is supported through PyTorch. The examples select CUDA automatically when available:
+1. define the process inputs (`I_S`) and outputs (`D_S`),
+2. generate or collect labelled datasets,
+3. write a `phys_res.py` file that evaluates the governing-equation residuals,
+4. define any required boundary residuals,
+5. construct a `main.py` script that configures the architecture, data loaders, optimizer, scheduler, and loss weights,
+6. train the model using `Training`, and
+7. evaluate the resulting surrogate through a `check.py` script.
 
-```python
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-```
+This design allows the process-specific physics to remain local to the new case while the rest of the pipeline is inherited directly from the package.
 
 ---
 
-## Citation
+## Outputs
 
-If you use `pinnse` in academic work, please cite the associated manuscript once available. Until then, cite the repository in the software or methods section and include the version or commit hash used in your work.
+A typical training run generates:
+
+- a best-model checkpoint,
+- training and validation loss histories,
+- optional weight and gradient histories,
+- prediction-versus-reference comparison results,
+- figures summarizing the model performance.
+
+The exact output files are controlled by the example scripts and their logging conventions.
 
 ---
 
 ## License
 
-This project is distributed under the MIT license. See [`LICENSE`](LICENSE) for details.
-
----
-
-## Contact
-
-**Harshit Verma**  
-Department of Chemical and Biological Engineering  
-Princeton University  
-`harshit.verma.che@gmail.com`
+This project is released under the **MIT License**. See [LICENSE](LICENSE) for details.
