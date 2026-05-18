@@ -2,20 +2,22 @@
   <img src="docs/logo.png" alt="pinnse logo" width="1000">
 </p>
 
+[![PyPI version](https://img.shields.io/pypi/v/pinnse.svg)](https://pypi.org/project/pinnse/)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
+[![PyTorch](https://img.shields.io/badge/PyTorch-enabled-ee4c2c)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
-![pytorch](https://img.shields.io/badge/PyTorch-enabled-ee4c2c)
-![license](https://img.shields.io/badge/license-MIT-green)
+# pinnse: Physics-informed neural networks for process systems engineering
 
-`pinnse` is a modular PyTorch framework for the development of physics-informed neural-network (PINN) surrogate models for chemical process modelling, simulation, and process systems engineering. The package separates process-specific ingredients—such as operating bounds, governing equations, input-output formulations, and residual definitions—from reusable learning infrastructure for data handling, normalization, neural-network construction, training, validation, testing, and visualization.
+`pinnse` is a modular PyTorch framework for developing physics-informed neural-network (PINN) surrogate models for chemical process modelling, simulation, and process systems engineering. The package separates process-specific ingredients—operating bounds, governing equations, input-output formulations, and residual definitions—from reusable learning infrastructure for data handling, normalization, neural-network construction, training, validation, testing, and visualization.
 
-The repository currently includes representative examples for nonideal flash separation, isothermal plug-flow reactors under multiple surrogate formulations, inverse PINNs for parameter estimation, and a nonisothermal plug-flow reactor with coupled mass and energy balances.
+The repository includes representative examples for nonideal flash separation, isothermal plug-flow reactors under multiple surrogate formulations, inverse PINNs for parameter estimation, and a nonisothermal plug-flow reactor with coupled mass and energy balances.
 
 <p align="center">
   <img src="docs/framework_overview.png" alt="pinnse framework overview" width="950">
 </p>
 
-At its core, `pinnse` follows a simple idea: define the process physics once, expose it through residual functions, and train a differentiable surrogate against both labelled data and physical constraints. The resulting models remain data-efficient, physically informed, and suitable for downstream use in simulation, design analysis, and optimization-oriented workflows.
+At its core, `pinnse` follows a simple principle: define the process physics once, expose it through residual functions, and train a differentiable surrogate against both labelled data and physical constraints. The resulting models are data-efficient, physically informed, and suitable for simulation, design analysis, and optimization-oriented workflows.
 
 ---
 
@@ -30,26 +32,41 @@ At its core, `pinnse` follows a simple idea: define the process physics once, ex
 - [Repository structure](#repository-structure)
 - [Extending pinnse](#extending-pinnse)
 - [Outputs](#outputs)
+- [Citation](#citation)
 - [License](#license)
 
 ---
 
 ## Why pinnse?
 
-First-principles models in chemical engineering are often nonlinear, tightly coupled, and costly to solve repeatedly. Conventional surrogate models can reduce this cost, but purely data-driven surrogates may violate conservation laws, equilibrium constraints, or boundary conditions. `pinnse` addresses this limitation by combining labelled simulator or solver data with residual losses derived from the governing equations.
+First-principles models in chemical engineering are often nonlinear, tightly coupled, and costly to solve repeatedly. Conventional surrogate models can reduce this cost, but purely data-driven surrogates may violate conservation laws, equilibrium relationships, or boundary conditions. `pinnse` addresses this limitation by combining labelled simulator or solver data with residual losses derived from governing equations.
 
-The framework is designed for process systems engineering settings in which a single unit operation may admit multiple surrogate formulations. For example, a plug-flow reactor may be represented in terms of effluent flowrates, reaction extents, or conversions. In `pinnse`, such formulation-specific choices are localized within each example, while the common infrastructure for data preparation, normalization, model training, and analysis is reused across cases.
+The framework is designed for process systems engineering settings in which a single unit operation may admit multiple surrogate formulations. For example, a plug-flow reactor can be represented in terms of effluent flowrates, reaction extents, or conversions. In `pinnse`, these formulation-specific choices remain local to each case-study directory, while the common infrastructure for data preparation, normalization, training, and analysis is reused across systems.
 
 ---
 
 ## Installation
 
-Clone the repository and install the package in editable mode:
+Install the latest released version from PyPI:
 
 ```bash
-git clone <repository-url>
+pip install pinnse
+```
+
+This installs the core runtime dependencies declared in `pyproject.toml`, including PyTorch, NumPy, SciPy, pandas, tqdm, scikit-learn, matplotlib, and openpyxl.
+
+Check the installation:
+
+```bash
+python -c "from pinnse import ANN, DataModule, Training; print('pinnse is ready')"
+```
+
+For development or to run the example scripts, clone the repository and install it in editable mode:
+
+```bash
+git clone https://github.com/hverma99/pinnse.git
 cd pinnse
-python -m pip install -e .
+pip install -e .
 ```
 
 A clean environment is recommended:
@@ -57,40 +74,39 @@ A clean environment is recommended:
 ```bash
 conda create -n pinnse python=3.11 -y
 conda activate pinnse
-python -m pip install -e .
+pip install pinnse
 ```
 
-The core package depends on:
-
-- `numpy`
-- `scipy`
-- `torch`
-- `pandas`
-- `tqdm`
-
-The example workflows and plotting utilities also use:
+Flash data generation through Aspen Plus requires Windows, Aspen Plus, and COM automation. To install the optional Python dependency for Aspen workflows, use:
 
 ```bash
-python -m pip install matplotlib scikit-learn openpyxl
-```
-
-For flash-data generation through Aspen Plus, the following are additionally required:
-
-```bash
-python -m pip install pywin32
+pip install "pinnse[aspen]"
 ```
 
 > **Note**
-> Training from the supplied `.xlsx` datasets does **not** require Aspen Plus. Aspen is only needed when regenerating flash datasets or running Aspen-based workflows.
+> `pip install pinnse` installs the Python package. To run the case-study scripts and access the supplied example datasets, clone the GitHub repository. Training from the supplied `.xlsx` datasets does **not** require Aspen Plus; Aspen is only needed when regenerating flash datasets or running Aspen-dependent workflows.
 
 ---
 
 ## Quick start
 
-The isothermal PFR examples are the most direct entry point because they do not depend on Aspen Plus.
+### Use the package in Python
+
+```python
+import torch.nn as nn
+from pinnse import ANN
+
+layer_size = [5, 64, 64, 64, 3]
+model = ANN(layer_size=layer_size, activation=nn.Tanh)
+```
+
+### Run an example from the repository
+
+The isothermal PFR examples are the most direct entry point because they do not require Aspen Plus.
 
 ```bash
-cd examples/isopfr/efm
+git clone https://github.com/hverma99/pinnse.git
+cd pinnse/examples/isopfr/efm
 python main.py
 python check.py
 ```
@@ -108,7 +124,7 @@ A standard run performs the following steps:
 The nonisothermal PFR example follows the same pattern:
 
 ```bash
-cd examples/nonisopfr
+cd pinnse/examples/nonisopfr
 python main.py
 python check.py
 ```
@@ -116,7 +132,7 @@ python check.py
 Flash examples can be trained from the supplied datasets:
 
 ```bash
-cd examples/flash/case1
+cd pinnse/examples/flash/case1
 python main.py
 ```
 
@@ -135,16 +151,14 @@ python main.py
 
 where the data loss fits labelled samples, the physics loss penalizes residual violations at collocation points, and the boundary loss enforces boundary or initial conditions.
 
-The figure above summarizes the workflow implemented in the repository:
-
 | Stage | Purpose | Typical file |
 |---|---|---|
-| **Framework initialization** | Defines the process variables, operating bounds, model formulation, network architecture, dataset sizes, optimizer, scheduler, and loss weights. | `main.py` |
-| **Data generation and sampling** | Generates labelled data from Aspen Plus, SciPy-based solvers, or process models, and prepares the sampled input-output space. | `data_gen.py` |
-| **Data loading** | Splits the labelled data and constructs supervised, physics-collocation, and boundary-collocation data loaders. | `pinnse/data.py` |
+| **Framework initialization** | Defines process variables, operating bounds, model formulation, architecture, dataset sizes, optimizer, scheduler, and loss weights. | `main.py` |
+| **Data generation and sampling** | Generates labelled data from Aspen Plus, SciPy solvers, or other process models. | `data_gen.py` |
+| **Data loading** | Splits labelled data and constructs supervised, physics-collocation, and boundary-collocation loaders. | `pinnse/data.py` |
 | **PINN architecture** | Defines the differentiable neural-network surrogate. | `pinnse/PINNs.py` |
-| **Physics residual formulation** | Encodes the governing equations in residual form and evaluates them on collocation batches. | `phys_res.py` |
-| **Training, validation, and testing** | Optimizes the surrogate, monitors validation performance, checkpoints the best model, and records loss histories. | `pinnse/train.py` |
+| **Physics residual formulation** | Encodes governing equations in residual form and evaluates them on collocation batches. | `phys_res.py` |
+| **Training, validation, and testing** | Optimizes the surrogate, monitors validation performance, checkpoints the best model, and records histories. | `pinnse/train.py` |
 | **Post-processing and analysis** | Evaluates trained models, denormalizes outputs, computes errors, and generates figures. | `check.py`, `pinnse/utils.py`, `pinnse/plots.py` |
 
 ---
@@ -155,28 +169,18 @@ The reusable framework is implemented in the `pinnse/` package.
 
 ### `pinnse/PINNs.py`
 
-This module defines the neural-network architectures used as PINN surrogates.
+Defines neural-network architectures used as PINN surrogates.
 
 | Class | Role |
 |---|---|
-| `ANN` | Standard fully connected feedforward network with Xavier-uniform weight initialization and zero biases. |
+| `ANN` | Fully connected feedforward network with Xavier-uniform weight initialization and zero biases. |
 | `SANN` | Feedforward network with a `Softplus` output layer, useful when outputs must remain non-negative. |
 | `BranchedANN` | Shared-trunk architecture with multiple output heads for structured multi-output regression. |
-| `Fourier_ANN` | Feedforward architecture with Fourier feature embedding, useful for strongly varying or oscillatory mappings. |
-
-Minimal example:
-
-```python
-import torch.nn as nn
-from pinnse import ANN
-
-layer_size = [dim_in] + [64] * 6 + [dim_out]
-model = ANN(layer_size=layer_size, activation=nn.Tanh)
-```
+| `Fourier_ANN` | Feedforward architecture with Fourier feature embedding for strongly varying mappings. |
 
 ### `pinnse/data.py`
 
-This module provides `DataModule`, which converts normalized `pandas.DataFrame` objects into PyTorch data loaders.
+Provides `DataModule`, which converts normalized `pandas.DataFrame` objects into PyTorch data loaders.
 
 Key capabilities include:
 
@@ -185,13 +189,13 @@ Key capabilities include:
 - boundary-collocation sampling through `bnd_colloc_loader()`,
 - data-loader inspection and export utilities.
 
-Notably, `phys_colloc_loader()` samples the interior input space using Latin hypercube sampling, while composition variables with prefixes such as `Z_`, `X_`, or `Y_` are sampled with Dirichlet distributions so that the resulting composition groups remain physically meaningful.
+`phys_colloc_loader()` samples the interior input space using Latin hypercube sampling. Composition variables with prefixes such as `Z_`, `X_`, or `Y_` are sampled with Dirichlet distributions so that composition groups remain physically meaningful.
 
 ### `pinnse/train.py`
 
-This module implements the `Training` class, which couples supervised data loss with optional physics and boundary residual losses.
+Implements the `Training` class, which couples supervised data loss with optional physics and boundary residual losses.
 
-Its functionality includes:
+Functionality includes:
 
 - epoch-wise training with `adam_step()`,
 - optional second-stage optimization with `lbfgs_step()`,
@@ -203,7 +207,7 @@ Its functionality includes:
 
 ### `pinnse/utils.py`
 
-This module provides common utilities for normalization, denormalization, result export, and post-training analysis.
+Provides common utilities for normalization, denormalization, result export, and post-training analysis.
 
 | Class | Role |
 |---|---|
@@ -214,18 +218,11 @@ This module provides common utilities for normalization, denormalization, result
 
 ### `pinnse/plots.py`
 
-This module defines the `Plotter` class for visualizing model-development history. It includes methods to plot:
-
-- individual loss histories,
-- full training and validation loss traces,
-- physics and boundary weight evolution,
-- gradient histories,
-- inverse-parameter trajectories, and
-- a combined summary view through `plot_everything()`.
+Defines the `Plotter` class for visualizing model-development history, including training and validation losses, physics and boundary weights, gradient histories, inverse-parameter trajectories, and combined summary plots.
 
 ### `pinnse/__init__.py`
 
-The package exports the main public API:
+Exports the main public API:
 
 ```python
 from pinnse import (
@@ -267,8 +264,8 @@ A typical example directory contains:
 ```text
 pinnse/
 ├── docs/
-│   ├── framework_overview.png
-│   └── pinnse_logo.png
+│   ├── logo.png
+│   └── framework_overview.png
 ├── examples/
 │   ├── flash/
 │   │   ├── Aspen Simulations/
@@ -296,7 +293,7 @@ pinnse/
 
 ## Extending pinnse
 
-To apply `pinnse` to a new process system, the typical workflow is:
+To apply `pinnse` to a new process system:
 
 1. define the process inputs (`I_S`) and outputs (`D_S`),
 2. generate or collect labelled datasets,
@@ -306,7 +303,7 @@ To apply `pinnse` to a new process system, the typical workflow is:
 6. train the model using `Training`, and
 7. evaluate the resulting surrogate through a `check.py` script.
 
-This design allows the process-specific physics to remain local to the new case while the rest of the pipeline is inherited directly from the package.
+This design keeps the process-specific physics local to each case while allowing the rest of the pipeline to be inherited from the package.
 
 ---
 
@@ -318,9 +315,15 @@ A typical training run generates:
 - training and validation loss histories,
 - optional weight and gradient histories,
 - prediction-versus-reference comparison results,
-- figures summarizing the model performance.
+- figures summarizing model performance.
 
 The exact output files are controlled by the example scripts and their logging conventions.
+
+---
+
+## Citation
+
+If you use `pinnse` in academic work, please cite the associated manuscript when available. Citation details will be added here following publication.
 
 ---
 

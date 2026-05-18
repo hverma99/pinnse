@@ -2,15 +2,36 @@
 requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# Project settings -----------------------------------------------------------------------------------------------------
 [project]
-name = "pinnse"  # Required
-version = "0.0.1"
-description = "description"  # Optional
-readme = "README.md"  # Optional
+name = "pinnse"
+version = "0.0.6"
+description = "A modular PyTorch framework for developing physics-informed neural network surrogate models for chemical process modeling, simulation, and process systems engineering."
+readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-keywords = ["PINNs", "PSE", "PINN"]  # Optional
+keywords = [
+    "physics-informed neural networks",
+    "modeling and simulation",
+    "process systems engineering",
+    "chemical engineering",
+    "machine learning",
+    "deep learning",
+    "surrogate modeling",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12"
+]
 authors = [
     { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
 ]
@@ -18,13 +39,36 @@ maintainers = [
     { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
 ]
 
-# Required dependencies ------------------------------------------------------------------------------------------------
 dependencies = [
-    "numpy", "scipy", "torch", "pandas", "tqdm"
+    "numpy",
+    "scipy",
+    "torch",
+    "pandas",
+    "tqdm",
+    "scikit-learn",
+    "matplotlib",
+    "openpyxl"
 ]
 
-[project.urls]  # Optional
-"Paper" = "https://ultralytics.com"
+[project.optional-dependencies]
+examples = [
+    "matplotlib",
+    "scikit-learn",
+    "openpyxl"
+]
+aspen = [
+    "pywin32"
+]
+dev = [
+    "build",
+    "twine",
+    "pytest"
+]
+
+[project.urls]
+Homepage = "https://github.com/hverma99/pinnse"
+Repository = "https://github.com/hverma99/pinnse"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["pinnse*"]
