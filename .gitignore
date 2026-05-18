@@ -1,3 +1,6 @@
 pinnse.egg-info/
 __pycache__/
+dist/
+build/
+*.egg-info/
 *.out
