@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="docs/pinnse_logo.png" alt="pinnse logo" width="1000">
+  <img src="docs/logo.png" alt="pinnse logo" width="1000">
 </p>
 
-# pinnse: Physics-informed neural networks for process systems engineering
 
 ![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
 ![pytorch](https://img.shields.io/badge/PyTorch-enabled-ee4c2c)
