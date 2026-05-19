@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/logo.png" alt="pinnse logo" width="1000">
-</p>
+![pinnse logo](docs/logo.png)
 
 [![PyPI version](https://img.shields.io/pypi/v/pinnse.svg)](https://pypi.org/project/pinnse/)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
@@ -13,9 +11,7 @@
 
 The repository includes representative examples for nonideal flash separation, isothermal plug-flow reactors under multiple surrogate formulations, inverse PINNs for parameter estimation, and a nonisothermal plug-flow reactor with coupled mass and energy balances.
 
-<p align="center">
-  <img src="docs/framework_overview.png" alt="pinnse framework overview" width="950">
-</p>
+![pinnse framework overview](docs/framework_overview.png)
 
 At its core, `pinnse` follows a simple principle: define the process physics once, expose it through residual functions, and train a differentiable surrogate against both labelled data and physical constraints. The resulting models are data-efficient, physically informed, and suitable for simulation, design analysis, and optimization-oriented workflows.
 
