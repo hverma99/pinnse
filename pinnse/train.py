@@ -1,11 +1,11 @@
-import torch, os, random, matplotlib.pyplot as plt, numpy as np
+import os
+import random
+import torch
 from torch import nn
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 from tqdm import tqdm
 from typing import Optional, Callable, Union
 from itertools import cycle
-import matplotlib.pyplot as plt
-import pandas as pd
 
 """
 Training module for supervised and PINN models.
@@ -60,6 +60,9 @@ class Training(object):
         self.phys_residual = phys_residual
         self.bnd_residual = bnd_residual
         self.ckpt_path = ckpt_path
+        ckpt_dir = os.path.dirname(self.ckpt_path)
+        if ckpt_dir:
+            os.makedirs(ckpt_dir, exist_ok=True)
         self.phys_weight = phys_weight
         self.bnd_weight = bnd_weight
         self.adapt_wts = adapt_wts
@@ -270,6 +273,7 @@ class Training(object):
     def adam_step(self, epochs: int, val_every: int, verbose: bool = True):
 
         best_total = float("inf")
+        ckpt_written = False
         loss_t, loss_d, loss_p, loss_b = [], [], [], []
         val_loss_t, val_loss_d, val_loss_p, val_loss_b = [], [], [], []
         wt_phys, wt_bnd = [], []
@@ -305,7 +309,7 @@ class Training(object):
                     f"\tData Loss:     {loss_stats['data_loss']:.2e},"
                     f"\tPhysics Loss:  {loss_stats['phys_loss']:.2e},"
                     f"\tBoundary Loss: {loss_stats['bnd_loss']:.2e}"
-                    f"\033[0m]"
+                    f"\033[0m"
                 )
 
             if (
@@ -357,6 +361,7 @@ class Training(object):
                     torch.save(
                         {"model_state_dict": self.model.state_dict()}, self.ckpt_path
                     )
+                    ckpt_written = True
 
                 if self.theta is not None:
                     inv_param.append(self.theta.detach().cpu().numpy().copy())
@@ -372,6 +377,10 @@ class Training(object):
                 self.scheduler.step()
         pbar.close()
 
+        if not ckpt_written:
+            torch.save(
+                {"model_state_dict": self.model.state_dict()}, self.ckpt_path
+            )
         ckpt = torch.load(self.ckpt_path, map_location=self.device)
         self.model.load_state_dict(ckpt["model_state_dict"])
         test_data, test_phys, test_bnd = self.validate_test(loader=self.test_loader)
@@ -431,8 +440,6 @@ class Training(object):
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of: {valid_modes}")
 
-        ckpt = torch.load(self.ckpt_path, map_location=self.device)
-
         def gather_full_data(loader):
             X, Y = [], []
             for x_batch, y_batch in loader:
@@ -451,7 +458,9 @@ class Training(object):
         self.X_phys_all = gather_full_colloc(self.all_phys_colloc_batches)
         self.X_bnd_all = gather_full_colloc(self.all_bnd_colloc_batches)
 
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        if os.path.isfile(self.ckpt_path):
+            ckpt = torch.load(self.ckpt_path, map_location=self.device)
+            self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.train()
 
         self.lbfgs = torch.optim.LBFGS(
