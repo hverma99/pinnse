@@ -535,9 +535,9 @@ class Boundary:
 
 ## Citation
 
-If you use `pinnse` in academic work, please cite the associated paper:
+If you use `pinnse`, please cite the associated paper:
 
-> Verma, H. "A Generalized Framework for Physics-Informed Neural Networks in Process Systems Engineering." *Computers & Chemical Engineering* (submitted).
+> Verma, H. and Maravelias C.T. "A Generalized Framework for Physics-Informed Neural Networks in Process Systems Engineering." *Computers & Chemical Engineering* (submitted).
 
 A BibTeX entry will be added here upon publication.
 
