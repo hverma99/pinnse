@@ -297,7 +297,7 @@ class Normalization:
         cols = normalize_cols if normalize_cols is not None else list(data.columns)
         for col in cols:
             cmean, cstd = data[col].mean(), data[col].std()
-            data_norm[col] = (data[col] - cmean) * cstd
+            data_norm[col] = (data[col] - cmean) / cstd
             metrics[col] = {"mean": float(cmean), "std": float(cstd)}
         return data_norm, metrics
 
