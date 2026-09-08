@@ -2,7 +2,7 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch, torch.nn as nn, pandas as pd
-from pinnse import Normalization, Noise, Save
+from pinnse import Normalization, Save
 from pinnse import DataModule
 from pinnse import ANN
 from pinnse import Training
@@ -12,12 +12,17 @@ from phys_res import Physics
 """
 Discrete-time (state-transition) PINN model for a non-isothermal CSTR.
 
-The PINN model maps the current state and manipulated variable to the state one
-sampling interval later, and the governing dynamics are enforced through a
-forward-Euler residual rather than through automatic differentiation with
-respect to an explicit time input. This formulation has no spatial boundary, so
-the boundary loss is disabled by setting its weight to zero.
+The model maps the current state and manipulated variable to the state one
+sampling interval later, and the dynamics are enforced by a discrete-time
+residual rather than by automatic differentiation with respect to time, which
+would not give the total derivative along the trajectory when the states are
+themselves inputs.
+
+SCHEME selects the integration scheme.
 """
+
+# ----------------------------- Run configuration -----------------------------
+SCHEME = "euler"  # "euler" | "rk4" | "bwd_euler" | "trapezoid"
 
 
 def main():
@@ -36,7 +41,7 @@ def main():
     norm_I_S_data, I_S_metrics = Normalization.min_max(I_S_data)
     norm_D_S_data, D_S_metrics = Normalization.min_max(D_S_data)
 
-    physics = Physics(I_S_metrics, D_S_metrics)
+    physics = Physics(I_S_metrics, D_S_metrics, scheme=SCHEME)
 
     N_C_P = 20000
     B_D, B_C_P = 500, 500
