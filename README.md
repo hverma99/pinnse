@@ -311,7 +311,7 @@ All public classes are importable directly from `pinnse`:
 
 ```python
 from pinnse import (
-    ANN, SANN, BranchedANN, Fourier_ANN,   # Architectures
+    ANN, SANN, MultiHeadANN, Fourier_ANN,   # Architectures
     DataModule,                              # Data loading
     Training,                                # Training loop
     Plotter,                                 # Visualization
@@ -326,7 +326,7 @@ from pinnse import (
 |---|---|---|
 | `ANN` | Fully connected feedforward network. Xavier-uniform weight init, zero biases. | General-purpose PINN surrogate. Default choice. |
 | `SANN` | Same as `ANN` but applies `Softplus` to the output layer. | When outputs must be non-negative (concentrations, flowrates). |
-| `BranchedANN` | Shared trunk with multiple independent output heads. | When outputs group naturally (e.g., compositions vs. temperature) and benefit from shared representation with separate specialization. |
+| `MultiHeadANN` | Shared trunk with multiple independent output heads. | When outputs group naturally (e.g., compositions vs. temperature) and benefit from shared representation with separate specialization. |
 | `Fourier_ANN` | Feedforward network with sinusoidal Fourier-feature embedding on the last input coordinate. | When the target function varies rapidly or has multi-scale behavior along one input dimension (e.g., reactor length). |
 
 ### Data Handling (`pinnse/data.py`)
