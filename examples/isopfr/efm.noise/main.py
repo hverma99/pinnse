@@ -25,7 +25,7 @@ identical architecture and seed, so that the contribution of the enforced physic
 # ----------------------------- Run configuration -----------------------------
 NOISE_LEVEL = 0.05  # Noise magnitude; interpretation depends on NOISE_MODE
 NOISE_MODE = "relative"  # "relative" | "proportional" | "absolute"
-# -----------------------------------------------------------------------------
+NOISE_SEED = 42  # Seed of the noise realization
 
 
 def main():
@@ -63,7 +63,7 @@ def main():
         noise_level=NOISE_LEVEL,
         mode=NOISE_MODE,
         clip_min=0.0,
-        random_state=42,
+        random_state=NOISE_SEED,
     )
 
     dim_in, dim_ot = I_S_data.shape[1], D_S_noisy.shape[1]
