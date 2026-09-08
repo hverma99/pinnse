@@ -302,6 +302,9 @@ if __name__ == "__main__":
     summary_df = pd.DataFrame(
         [
             {
+                # Instance folder name, so that the summary rows of the
+                # individual runs remain distinguishable once concatenated.
+                "run": os.path.basename(os.getcwd()),
                 "noise_mode": NOISE_MODE,
                 "noise_level": NOISE_LEVEL,
                 "noise_seed": NOISE_SEED,
