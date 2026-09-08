@@ -8,9 +8,9 @@ This module defines a collection of feedforward neural network architectures
 that can be used within the proposed framework. The provided
 models include:
 
-- ANN         : standard fully connected feedforward neural network
-- BranchedANN : shared-trunk network with multiple output heads
-- Fourier_ANN : feedforward network with Fourier-feature augmentation
+- ANN           : standard fully connected feedforward neural network
+- MultiHeadANN  : shared-trunk network with multiple output heads
+- Fourier_ANN   : feedforward network with Fourier-feature augmentation
 
 These architectures are designed to support flexible experimentation with
 different network structures while maintaining a common PyTorch-based interface.
@@ -111,9 +111,16 @@ class SANN(nn.Module):
         return self.softplus(raw_output)
 
 
-class BranchedANN(nn.Module):
+class MultiHeadANN(nn.Module):
     """
-    Branched feedforward neural network with a shared trunk and multiple heads.
+    Multi-head feedforward neural network: a shared trunk with output heads.
+
+    This is hard parameter sharing in the multi-task-learning sense: a shared
+    trunk of hidden layers learns a common representation, and a small
+    output-specific head predicts each block of dependent variables. The
+    architecture sits between a single fully shared network with multiple
+    outputs and a set of fully independent per-variable networks, retaining
+    output-specific parameters while amortizing the shared representation.
 
     Inputs
     ------

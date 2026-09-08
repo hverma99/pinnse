@@ -1,20 +1,22 @@
-from .PINNs import ANN, SANN, BranchedANN, Fourier_ANN
+from .PINNs import ANN, SANN, MultiHeadANN, Fourier_ANN
 from .data import DataModule, DataLoader
-from .train import Training
+from .train import Training, PCGrad
 from .plots import Plotter
-from .utils import Normalization, Denormalization, Save, Analyze
+from .utils import Normalization, Denormalization, Save, Analyze, Noise
 
 __all__ = [
     "ANN",
     "SANN",
-    "BranchedANN",
+    "MultiHeadANN",
     "Fourier_ANN",
     "DataModule",
     "DataLoader",
     "Training",
+    "PCGrad",
     "Plotter",
     "Normalization",
     "Denormalization",
     "Save",
     "Analyze",
+    "Noise",
 ]

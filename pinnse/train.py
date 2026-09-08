@@ -22,7 +22,98 @@ boundary-residual constraints. The class supports:
 The implementation is designed for PINN workflows in which the total
 training objective may combine labeled-data loss with additional residual-based
 penalty terms.
+
+By default the individual losses are combined into a scalar weighted sum. For
+training strategies that operate on the per-loss gradients themselves rather
+than on scalar weights, the `grad_aggregator` extension point accepts a
+user-supplied callable that receives the individual losses, the current loss
+weights, and the trainable parameters, and is responsible for populating the
+parameter gradients. `PCGrad` is provided as a reference implementation; any
+other multi-objective strategy can be supplied without modifying this module.
 """
+
+
+class PCGrad(object):
+    """
+    Projecting-Conflicting-Gradients (PCGrad) loss aggregation.
+
+    Reference implementation of the gradient-surgery strategy of Yu et al.
+    (2020), provided as a ready-to-use `grad_aggregator` for `Training`. Where
+    gradient-norm-based adaptive weighting balances only the magnitudes of the
+    individual loss gradients, PCGrad additionally resolves conflicts in their
+    directions: whenever two loss gradients have a negative inner product, each
+    is projected onto the normal plane of the other before the gradients are
+    summed.
+
+    Inputs
+    ------
+    apply_weights : bool, optional, default=True
+        Whether to scale each loss by its current weight before computing the
+        per-loss gradients. If False, the raw losses are used and the physics
+        and boundary weights act only as on/off switches.
+    eps : float, optional, default=1e-12
+        Small positive constant used for numerical stability.
+
+    Notes
+    -----
+    Supplying a `grad_aggregator` replaces the default scalar weighted-sum
+    update. A custom strategy only needs to match the call signature
+    `(losses, weights, params) -> torch.Tensor`, populate `p.grad` for every
+    parameter in `params`, and return the scalar total loss for logging.
+    """
+
+    def __init__(self, apply_weights: bool = True, eps: float = 1e-12):
+        self.apply_weights = apply_weights
+        self.eps = eps
+
+    def __call__(self, losses: dict, weights: dict, params: list):
+        names = [name for name, loss in losses.items() if loss is not None]
+        if not names:
+            raise ValueError("PCGrad requires at least one non-None loss.")
+
+        flat_grads = []
+        for name in names:
+            weight = weights.get(name, 1.0) if self.apply_weights else 1.0
+            grads = torch.autograd.grad(
+                weight * losses[name],
+                params,
+                retain_graph=True,
+                allow_unused=True,
+            )
+            grads = [
+                torch.zeros_like(p) if g is None else g for p, g in zip(params, grads)
+            ]
+            flat_grads.append(torch.cat([g.reshape(-1) for g in grads]))
+
+        # Project each loss gradient off any conflicting loss gradient
+        projected = [g.clone() for g in flat_grads]
+        n_tasks = len(flat_grads)
+        for i in range(n_tasks):
+            for j in torch.randperm(n_tasks).tolist():
+                if i == j:
+                    continue
+                inner = torch.dot(projected[i], flat_grads[j])
+                if inner < 0:
+                    projected[i] = (
+                        projected[i]
+                        - (inner / (torch.dot(flat_grads[j], flat_grads[j]) + self.eps))
+                        * flat_grads[j]
+                    )
+
+        # Write the aggregated gradient back onto the parameters
+        aggregated = torch.stack(projected).sum(dim=0)
+        offset = 0
+        for p in params:
+            numel = p.numel()
+            p.grad = aggregated[offset : offset + numel].view_as(p).clone()
+            offset += numel
+
+        total = sum(
+            (weights.get(name, 1.0) if self.apply_weights else 1.0)
+            * losses[name].detach()
+            for name in names
+        )
+        return total
 
 
 class Training(object):
@@ -45,6 +136,7 @@ class Training(object):
         bnd_weight: float = 0.0,
         adapt_wts: bool = False,
         theta: Optional[torch.nn.Parameter] = None,
+        grad_aggregator: Optional[Callable] = None,
     ):
 
         self.model = model
@@ -64,6 +156,7 @@ class Training(object):
         self.bnd_weight = bnd_weight
         self.adapt_wts = adapt_wts
         self.theta = theta
+        self.grad_aggregator = grad_aggregator
 
         self.wt_update_every = 10
         self.wt_ema = 0.1
@@ -82,6 +175,15 @@ class Training(object):
             else []
         )
         self.trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+
+        # Parameters seen by a custom gradient aggregator.
+        self.agg_params = list(self.trainable_params)
+
+        # Unknown process parameters estimated in inverse problems are included here so that
+        # multi-objective strategies also act on them, whereas the gradient-norm-based
+        # adaptive weights are computed with respect to the network parameters only.
+        if self.theta is not None and self.theta.requires_grad:
+            self.agg_params.append(self.theta)
 
     def grad_norm(self, loss):
         if loss is not None:
@@ -157,15 +259,27 @@ class Training(object):
             grad_b_sum += norm_bnd_loss.item()
             grad_count += 1
 
-            loss = (
-                ld
-                + (self.phys_weight * lp if lp is not None else 0.0)
-                + (self.bnd_weight * lb if lb is not None else 0.0)
-            )
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+            if self.grad_aggregator is not None:
+                self.optimizer.zero_grad()
+                loss = self.grad_aggregator(
+                    {"data": ld, "physics": lp, "boundary": lb},
+                    {
+                        "data": 1.0,
+                        "physics": self.phys_weight,
+                        "boundary": self.bnd_weight,
+                    },
+                    self.agg_params,
+                )
+                self.optimizer.step()
+            else:
+                loss = (
+                    ld
+                    + (self.phys_weight * lp if lp is not None else 0.0)
+                    + (self.bnd_weight * lb if lb is not None else 0.0)
+                )
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
 
             # Accounting losses
             tot_loss_sum += loss.item() * batch_size

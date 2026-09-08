@@ -736,3 +736,98 @@ class Save:
             df.to_csv(os.path.join(foldername, f"{key}.csv"), index=False)
 
         print(f"Saved training history CSV files to folder: {foldername}")
+
+
+class Noise:
+    """
+    Measurement-noise models for labeled datasets.
+
+    Labeled data generated from a first-principle model or a process simulator
+    is noise free, whereas experimental and plant measurements are not. These
+    utilities perturb a labeled dataset generated from first-principle models/process simulators
+    so that it emulates practical measurements, which allows the relative contributions
+    of the supervised data loss and the physics loss to be assessed under realistic conditions.
+
+    Noise is applied to the labeled dataset only. The physics- and
+    boundary-collocation datasets are unaffected, since they require sampled
+    independent-input variables only and carry no measured values.
+    """
+
+    @staticmethod
+    def gaussian(
+        data: pd.DataFrame,
+        noise_level: float | dict[str, float],
+        mode: str = "relative",
+        noise_cols: list[str] | None = None,
+        clip_min: float | None = None,
+        random_state: int | None = 42,
+    ):
+        """
+        Add zero-mean Gaussian noise to selected columns of a labeled dataset.
+
+        Inputs
+        ------
+        data : pd.DataFrame
+            Labeled dataset to perturb (typically D_S, the dependent outputs).
+        noise_level : float or dict[str, float]
+            Noise level. A scalar applies the same level to every noisedcolumn;
+            a dictionary specifies the level per column name.
+        mode : str, optional, default="relative"
+            Noise model:
+            - "relative"     : sigma = noise_level * std(column), homoscedastic
+                               noise scaled by the spread of each variable.
+            - "proportional" : sigma = noise_level * |value|, heteroscedastic
+                               noise proportional to the measured magnitude,
+                               typical of flow and composition sensors.
+            - "absolute"     : sigma = noise_level, in the units of the column.
+        noise_cols : list[str], optional
+            Columns to perturb. If None, all columns are perturbed.
+        clip_min : float, optional
+            If given, perturbed values are clipped below at this value, e.g.
+            0.0 to keep non-negative quantities such as flowrates physical.
+        random_state : int, optional, default=42
+            Seed for the random number generator, for reproducibility.
+
+        Returns
+        -------
+        data_noisy : pd.DataFrame
+            DataFrame with the selected columns perturbed.
+        metrics : dict
+            Per-column dictionary of the applied noise model, containing the
+            mode, the noise level, and the realized standard deviation sigma.
+        """
+        valid_modes = ("relative", "proportional", "absolute")
+        if mode not in valid_modes:
+            raise ValueError(f"Gaussian noise mode must be one of: {valid_modes}")
+
+        rng = np.random.default_rng(random_state)
+        data_noisy, metrics = data.copy(), {}
+        cols = noise_cols if noise_cols is not None else list(data.columns)
+
+        for col in cols:
+            level = (
+                noise_level[col]
+                if isinstance(noise_level, dict)
+                else float(noise_level)
+            )
+            values = data[col].to_numpy(dtype=np.float64)
+
+            if mode == "relative":
+                sigma = level * values.std()
+            elif mode == "proportional":
+                sigma = level * np.abs(values)
+            else:
+                sigma = level
+
+            perturbed = values + rng.normal(loc=0.0, scale=sigma, size=values.shape)
+            if clip_min is not None:
+                perturbed = np.clip(perturbed, clip_min, None)
+
+            data_noisy[col] = perturbed
+            metrics[col] = {
+                "mode": mode,
+                "level": level,
+                "sigma": float(np.mean(sigma)) if np.ndim(sigma) else float(sigma),
+            }
+
+        return data_noisy, metrics
