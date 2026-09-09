@@ -315,3 +315,213 @@ class DataModule:
 
         df.to_excel(filename, index=False)
         print(f"Saved {len(df)} samples to {filename}")
+
+
+class SequenceDataModule:
+    """
+    Construct DataLoaders for sequence (trajectory) formulations.
+
+    Counterpart of `DataModule` for models whose samples are whole trajectories
+    rather than independent rows. Inputs and outputs are three-dimensional
+    arrays of shape (n_trajectories, seq_len, n_features), partitioning is by
+    whole trajectory so that no trajectory contributes to more than one
+    partition, and physics-collocation samples are trajectories rather than
+    points.
+
+    Inputs
+    ------
+    I_S_data : np.ndarray
+        Normalized input sequences of shape (n_trajectories, seq_len, dim_in).
+
+    D_S_data : np.ndarray
+        Normalized output sequences of shape (n_trajectories, seq_len, dim_ot).
+
+    labeled_data_batch_size : int
+        Number of trajectories per labeled batch.
+
+    physics_coll_data_size : int, optional
+        Number of collocation trajectories to generate.
+
+    physics_coll_batch_size : int, optional
+        Number of collocation trajectories per batch.
+
+    context_cols : list[int], optional
+        Indices of the input features that stay constant along a trajectory,
+        such as an initial condition carried as a context feature. If omitted,
+        they are detected from the labeled data.
+
+    n_segments : int, optional, default=1
+        Number of piecewise-constant segments used when sampling the remaining
+        (driving) input features for collocation.
+
+    test_frac : float, optional
+        Fraction of trajectories held out as the test partition.
+
+    val_frac : float, optional
+        Fraction of the remaining trajectories used for validation.
+
+    random_state : int, optional, default=42
+        Seed used for partitioning and for collocation sampling.
+    """
+
+    def __init__(
+        self,
+        I_S_data: np.ndarray,
+        D_S_data: np.ndarray,
+        labeled_data_batch_size: int,
+        physics_coll_data_size: Optional[int] = None,
+        physics_coll_batch_size: Optional[int] = None,
+        context_cols: Optional[list[int]] = None,
+        n_segments: int = 1,
+        test_frac: Optional[float] = None,
+        val_frac: Optional[float] = None,
+        random_state: Optional[int] = 42,
+    ):
+        I_S_data = np.asarray(I_S_data)
+        D_S_data = np.asarray(D_S_data)
+
+        if I_S_data.ndim != 3 or D_S_data.ndim != 3:
+            raise ValueError(
+                "SequenceDataModule expects arrays of shape "
+                "(n_trajectories, seq_len, n_features); received "
+                f"{I_S_data.shape} and {D_S_data.shape}."
+            )
+        if I_S_data.shape[:2] != D_S_data.shape[:2]:
+            raise ValueError(
+                "Input and output sequences must agree in the number of "
+                f"trajectories and steps; received {I_S_data.shape[:2]} and "
+                f"{D_S_data.shape[:2]}."
+            )
+
+        self.I_S_data = I_S_data
+        self.D_S_data = D_S_data
+        self.labeled_data_batch_size = labeled_data_batch_size
+        self.physics_coll_data_size = physics_coll_data_size
+        self.physics_coll_batch_size = physics_coll_batch_size
+        self.n_segments = n_segments
+        self.test_frac = test_frac
+        self.val_frac = val_frac
+        self.random_state = random_state
+
+        self.n_traj, self.seq_len, self.dim_in = I_S_data.shape
+
+        self.lower_bnd, self.upper_bnd = I_S_data.min(axis=(0, 1)), I_S_data.max(
+            axis=(0, 1)
+        )
+
+        # initial & boundary conditions are held constant when sampling collocation
+        if context_cols is None:
+            spread = (I_S_data.max(axis=1) - I_S_data.min(axis=1)).max(axis=0)
+            context_cols = np.flatnonzero(spread == 0).tolist()
+        self.context_cols = list(context_cols)
+        self.driving_cols = [
+            j for j in range(self.dim_in) if j not in self.context_cols
+        ]
+
+        # Partition by whole trajectory
+        idx = np.arange(self.n_traj)
+        idx_tv, self.idx_test = train_test_split(
+            idx, test_size=self.test_frac, random_state=self.random_state
+        )
+        self.idx_train, self.idx_val = train_test_split(
+            idx_tv, test_size=self.val_frac, random_state=self.random_state
+        )
+
+    def labeled_data_loader(self):
+        """
+        Construct labeled DataLoaders for the training, validation and test
+        partitions, batched over whole trajectories.
+
+        Returns
+        -------
+        train_loader : torch.utils.data.DataLoader
+            DataLoader containing the training trajectories.
+
+        val_loader : torch.utils.data.DataLoader
+            DataLoader containing the validation trajectories.
+
+        test_loader : torch.utils.data.DataLoader
+            DataLoader containing the test trajectories.
+
+        Notes
+        -----
+        - Each batch has the form (X, Y) with respective shapes of
+          (batch_size, seq_len, dim_in) and (batch_size, seq_len, dim_ot).
+        """
+        X = self.I_S_data.astype(np.float32)
+        Y = self.D_S_data.astype(np.float32)
+
+        def make_loader(idx: np.ndarray, shuffle: bool, drop_last: bool = False):
+            dataset = TensorDataset(torch.from_numpy(X[idx]), torch.from_numpy(Y[idx]))
+            return DataLoader(
+                dataset=dataset,
+                batch_size=self.labeled_data_batch_size,
+                shuffle=shuffle,
+                drop_last=drop_last,
+            )
+
+        train_loader = make_loader(self.idx_train, shuffle=True)
+        val_loader = make_loader(self.idx_val, shuffle=False)
+        test_loader = make_loader(self.idx_test, shuffle=False)
+
+        return train_loader, val_loader, test_loader
+
+    def phys_colloc_loader(self, shuffle: bool = True, drop_last: bool = False):
+        """
+        Generate a physics-collocation DataLoader of unlabeled trajectories.
+
+        Inputs
+        ------
+        shuffle : bool, optional, default=True
+            Whether to shuffle the collocation trajectories.
+
+        drop_last : bool, optional, default=False
+            Whether to drop the last incomplete batch.
+
+        Returns
+        -------
+        DataLoader
+            DataLoader containing collocation inputs only. Each batch has the
+            form (X_coll,), where X_coll has shape (batch_size, seq_len, dim_in).
+
+        Notes
+        -----
+        - Context features are sampled once per trajectory and held constant
+          along it; driving features are sampled as `n_segments` levels and
+          expanded into a piecewise-constant schedule.
+        - All features are sampled using Latin Hypercube Sampling
+        """
+        rng = np.random.default_rng(self.random_state)
+        N_colloc = (
+            self.physics_coll_data_size
+            if self.physics_coll_data_size is not None
+            else 0
+        )
+
+        n_ctx = len(self.context_cols)
+        sampler = qmc.LatinHypercube(
+            d=n_ctx + len(self.driving_cols) * self.n_segments, rng=rng
+        )
+        unit = sampler.random(N_colloc)
+
+        X_coll = np.empty((N_colloc, self.seq_len, self.dim_in), dtype=np.float32)
+
+        for i, col in enumerate(self.context_cols):
+            lb, ub = self.lower_bnd[col], self.upper_bnd[col]
+            X_coll[:, :, col] = (lb + unit[:, i] * (ub - lb))[:, None]
+
+        per_seg = int(np.ceil(self.seq_len / self.n_segments))
+        for i, col in enumerate(self.driving_cols):
+            start = n_ctx + i * self.n_segments
+            levels = unit[:, start : start + self.n_segments]
+            lb, ub = self.lower_bnd[col], self.upper_bnd[col]
+            levels = lb + levels * (ub - lb)
+            X_coll[:, :, col] = np.repeat(levels, per_seg, axis=1)[:, : self.seq_len]
+
+        dataset = TensorDataset(torch.from_numpy(X_coll))
+        return DataLoader(
+            dataset=dataset,
+            batch_size=self.physics_coll_batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+        )
