@@ -11,6 +11,7 @@ models include:
 - ANN           : standard fully connected feedforward neural network
 - MultiHeadANN  : shared-trunk network with multiple output heads
 - Fourier_ANN   : feedforward network with Fourier-feature augmentation
+- RecurrentANN  : recurrent sequence-to-sequence network for state-transition (discrete-time) formulations
 
 These architectures are designed to support flexible experimentation with
 different network structures while maintaining a common PyTorch-based interface.
@@ -279,3 +280,101 @@ class Fourier_ANN(nn.Module):
 
         raw = self.net(x)
         return self.softplus(raw) if self.positive_output else raw
+
+
+class RecurrentANN(nn.Module):
+    """
+    Recurrent sequence-to-sequence network for discrete-time formulations.
+
+    Inputs
+    ------
+    in_dim : int
+        Number of input features per time step.
+
+    hidden_dim : int
+        Width of the recurrent hidden state.
+
+    out_dim : int
+        Number of output features per time step.
+
+    n_layers : int, optional, default=1
+        Number of stacked recurrent layers.
+
+    cell : str, optional, default="gru"
+        Recurrent cell type, one of "rnn", "gru" or "lstm".
+
+    head_layers : list[int] | None, optional, default=None
+        Hidden widths of the output head applied at each time step.
+        If None, a single linear layer maps the hidden state to the output.
+
+    activation : type[nn.Module], optional, default=nn.Tanh
+        Activation class used in the output head.
+
+    Returns
+    -------
+    torch.Tensor
+        Predicted output sequence of shape `(batch_size, seq_len, out_dim)`.
+
+    Notes
+    -----
+    - The hidden state is initialized to zero, so information about the initial
+      condition must be supplied through the input features.
+    - The output head is applied independently at each time step, and is
+      initialized using Xavier uniform initialization with zero biases.
+    - The forward pass takes a single tensor, so this class is a drop-in
+      replacement for the feedforward architectures within the training loop,
+      and the residual interface is likewise unchanged: a physics residual
+      receives the input and output sequences and may enforce a discrete-time
+      relation between successive time steps.
+    """
+
+    CellType = {"rnn": nn.RNN, "gru": nn.GRU, "lstm": nn.LSTM}
+
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int,
+        out_dim: int,
+        n_layers: int = 1,
+        cell: str = "gru",
+        head_layers: list[int] | None = None,
+        activation: type[nn.Module] = nn.Tanh,
+    ):
+        super().__init__()
+
+        cell = cell.lower()
+        if cell not in self.CellType:
+            raise ValueError(
+                f"Unknown cell '{cell}'; expected one of "
+                f"{', '.join(sorted(self.CellType))}."
+            )
+        self.cell = cell
+
+        self.recurrent = self.CellType[cell](
+            input_size=in_dim,
+            hidden_size=hidden_dim,
+            num_layers=n_layers,
+            batch_first=True,
+        )
+
+        dims = [hidden_dim] + list(head_layers or [])
+        head = []
+        for i in range(len(dims) - 1):
+            head.append(nn.Linear(dims[i], dims[i + 1]))
+            head.append(activation())
+        head.append(nn.Linear(dims[-1], out_dim))
+        self.head = nn.Sequential(*head)
+
+        for m in self.head.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        if x.dim() != 3:
+            raise ValueError(
+                "RecurrentANN expects an input of shape (batch, seq_len, in_dim); "
+                f"received {tuple(x.shape)}."
+            )
+        h, _ = self.recurrent(x)
+        return self.head(h)
