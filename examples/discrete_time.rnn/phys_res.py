@@ -7,19 +7,14 @@ SCHEMES = ("euler", "rk4", "bwd_euler", "trapezoid")
 
 class Physics:
     """
-    Discrete-time state-transition residual,
+    Unrolled discrete-time residual, applied along each predicted trajectory,
 
-        r = u_k1 - (u_k + deltaT * phi),
+        r_k = u_k1 - (u_k + deltaT * phi),   k = 0 .. T-1
 
-    where phi is the increment of the scheme named by `scheme`:
-
-        euler      phi = f(u_k)                     explicit, 1st order
-        rk4        classical four-stage increment   explicit, 4th order
-        bwd_euler  phi = f(u_k1)                    implicit, 1st order
-        trapezoid  phi = (f(u_k) + f(u_k1)) / 2     implicit, 2nd order
-
-    The implicit schemes need no iterative solve, since the next state is the
-    network output and is already available when the residual is formed.
+    where u_k is the network's own prediction from the previous step and the
+    initial condition supplies step 0. The residual therefore chains
+    predictions: a trajectory satisfies it only if successive predictions are
+    mutually consistent, which a single-transition residual cannot express.
     """
 
     def __init__(
@@ -27,7 +22,7 @@ class Physics:
         I_S_metrics: dict,
         D_S_metrics: dict,
         dt: float = cstr.deltaT,
-        scheme: str = "euler",
+        scheme: str = "rk4",
     ):
         self.I_S_metrics = I_S_metrics
         self.D_S_metrics = D_S_metrics
@@ -40,8 +35,8 @@ class Physics:
             )
         self.scheme = scheme
 
-        self.in_keys = ["CA_k", "T_k", "TC_k"]
-        self.ot_keys = ["CA_k1", "T_k1"]
+        self.in_keys = cstr.I_S_keys
+        self.ot_keys = cstr.D_S_keys
 
         # Output ranges
         self.ot_ranges = [
@@ -68,9 +63,7 @@ class Physics:
     ):
         """
         Increment phi of the selected scheme, such that the update over one
-        interval is u_k + dt * phi. The implicit schemes evaluate the
-        right-hand side at the predicted next state, which is the network
-        output. The manipulated variable is held constant across the interval.
+        interval is u_k + dt * phi.
         """
         if self.scheme == "euler":
             return self._f(CA_k, T_k, TC_k)
@@ -95,38 +88,54 @@ class Physics:
 
     def physics_residual(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
-        Compute the discrete-time state-transition residual.
+        Compute the unrolled discrete-time residual along each trajectory.
 
         Inputs
         ------
         x : torch.Tensor
-            Normalized input tensor with columns [CA_k, T_k, TC_k].
+            Normalized input sequence of shape (batch, seq_len, 3), with
+            features [CA_0, T_0, TC_k]. The first two are constant along the
+            sequence and carry the initial condition.
         y : torch.Tensor
-            Normalized output tensor with columns [CA_k1, T_k1].
+            Normalized output sequence of shape (batch, seq_len, 2), with
+            features [CA_k1, T_k1], holding the predicted states u_1 .. u_T.
 
         Returns
         -------
         torch.Tensor
-            Nondimensionalized residual tensor of shape (batch, 2).
+            Nondimensionalized residual tensor of shape (batch, seq_len, 2).
         """
-        # Denormalize inputs and outputs to dimensional variables
-        CA_k = Denormalization.min_max_col(x[:, 0:1], "CA_k", self.I_S_metrics)
-        T_k = Denormalization.min_max_col(x[:, 1:2], "T_k", self.I_S_metrics)
-        TC_k = Denormalization.min_max_col(x[:, 2:3], "TC_k", self.I_S_metrics)
+        if x.dim() != 3 or y.dim() != 3:
+            raise ValueError(
+                "Physics expects sequence-shaped tensors (batch, seq_len, features); "
+                f"received x {tuple(x.shape)} and y {tuple(y.shape)}."
+            )
 
-        CA_k1 = Denormalization.min_max_col(y[:, 0:1], "CA_k1", self.D_S_metrics)
-        T_k1 = Denormalization.min_max_col(y[:, 1:2], "T_k1", self.D_S_metrics)
+        # Initial condition, taken from the constant context features at step 0
+        CA_init = Denormalization.min_max_col(x[:, :1, 0:1], "CA_0", self.I_S_metrics)
+        T_init = Denormalization.min_max_col(x[:, :1, 1:2], "T_0", self.I_S_metrics)
+
+        # Coolant temperature at every step
+        TC_k = Denormalization.min_max_col(x[:, :, 2:3], "TC_k", self.I_S_metrics)
+
+        # Predicted next states u_1 .. u_T
+        CA_next = Denormalization.min_max_col(y[:, :, 0:1], "CA_k1", self.D_S_metrics)
+        T_next = Denormalization.min_max_col(y[:, :, 1:2], "T_k1", self.D_S_metrics)
+
+        # Current states u_0 .. u_{T-1}: the initial condition, then the
+        # network's own predictions shifted by one step
+        CA_curr = torch.cat([CA_init, CA_next[:, :-1, :]], dim=1)
+        T_curr = torch.cat([T_init, T_next[:, :-1, :]], dim=1)
 
         # Physics-based update of the current state over one sampling interval
-        phi_CA, phi_T = self._increment(CA_k, T_k, CA_k1, T_k1, TC_k)
+        phi_CA, phi_T = self._increment(CA_curr, T_curr, CA_next, T_next, TC_k)
 
-        # Discrete-time residual: predicted next state minus the physics update
-        res_CA = CA_k1 - (CA_k + self.dt * phi_CA)
-        res_T = T_k1 - (T_k + self.dt * phi_T)
+        res_CA = CA_next - (CA_curr + self.dt * phi_CA)
+        res_T = T_next - (T_curr + self.dt * phi_T)
 
-        res = torch.cat([res_CA, res_T], dim=1)
+        res = torch.cat([res_CA, res_T], dim=2)
         rngs = torch.tensor(self.ot_ranges, device=res.device, dtype=res.dtype)
-        return res / (rngs.view(1, -1) + 1e-8)
+        return res / (rngs.view(1, 1, -1) + 1e-8)
 
     def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return self.physics_residual(x, y)

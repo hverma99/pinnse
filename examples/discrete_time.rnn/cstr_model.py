@@ -1,12 +1,11 @@
 import numpy as np
 
 """
-Non-isothermal CSTR process model.
+Non-isothermal CSTR process model, trajectory formulation.
 
-Benchmark CSTR with a single irreversible exothermic reaction A -> B and a
-cooling jacket, adapted from Seborg et al., Process Dynamics and Control.
-The states are the concentration of A and the reactor temperature; the coolant
-temperature is the manipulated variable.
+Same reactor as the `discrete_time` example (Seborg et al.), differing only in
+the sampling interval and the sampling domain, both set for trajectory rather
+than single-transition prediction.
 
     dCA/dt = (q/V)(CA_f - CA) - k0 exp(-E/(R T)) CA
     dT/dt  = (q/V)(T_f - T) + ((-dH)/(rho Cp)) k0 exp(-E/(R T)) CA
@@ -25,15 +24,27 @@ UA = 5.0e4  # Heat-transfer coefficient times area, J/(min K)
 CA_f = 1.0  # Feed concentration of A, mol/L
 T_f = 350.0  # Feed temperature, K
 
-# Admissible operating bounds
+# Sampling interval.
+deltaT = 0.005
+
+# Trajectory length and horizon
+SEQ_LEN = 200  # steps; SEQ_LEN * deltaT = 1.0 min = one residence time
+N_SEG = 4  # piecewise-constant segments of the coolant schedule
+
+# Operating bounds for trajectory sampling. This reactor admits multiple
+# steady states (at TC = 300 K: 324.5 K stable, 350.0 K unstable, 369.7 K
+# stable), and trajectories crossing the unstable branch run away to about
+# 580 K, so the envelope stays on the low-temperature branch.
 bounds = {
-    "CA_k": (0.1, 1.0),  # mol/L
-    "T_k": (320.0, 380.0),  # K
-    "TC_k": (280.0, 320.0),  # K
+    "CA_0": (0.20, 0.60),  # initial concentration of A, mol/L
+    "T_0": (330.0, 345.0),  # initial reactor temperature, K
+    "TC_k": (295.0, 306.0),  # coolant temperature, K
 }
 
-# Sampling interval
-deltaT = 0.0005
+T_CEILING = 400.0  # trajectories exceeding this are discarded as runaway
+
+I_S_keys = ["CA_0", "T_0", "TC_k"]  # input features per time step
+D_S_keys = ["CA_k1", "T_k1"]  # output features per time step
 
 
 def derivatives(CA, T, TC):
