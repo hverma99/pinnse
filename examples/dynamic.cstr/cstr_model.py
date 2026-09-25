@@ -3,9 +3,8 @@ import numpy as np
 """
 Non-isothermal CSTR process model, trajectory formulation.
 
-Same reactor as the `discrete_time` example (Seborg et al.), differing only in
-the sampling interval and the sampling domain, both set for trajectory rather
-than single-transition prediction.
+Non-isothermal CSTR (Seborg et al.), with the sampling interval and the
+sampling domain set for trajectory rather than single-transition prediction.
 
     dCA/dt = (q/V)(CA_f - CA) - k0 exp(-E/(R T)) CA
     dT/dt  = (q/V)(T_f - T) + ((-dH)/(rho Cp)) k0 exp(-E/(R T)) CA
