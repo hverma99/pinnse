@@ -137,6 +137,7 @@ class Training(object):
         adapt_wts: bool = False,
         theta: Optional[torch.nn.Parameter] = None,
         grad_aggregator: Optional[Callable] = None,
+        weight_scheme: Optional[Callable] = None,
     ):
 
         self.model = model
@@ -157,6 +158,7 @@ class Training(object):
         self.adapt_wts = adapt_wts
         self.theta = theta
         self.grad_aggregator = grad_aggregator
+        self.weight_scheme = weight_scheme
 
         self.wt_update_every = 10
         self.wt_ema = 0.1
@@ -432,17 +434,34 @@ class Training(object):
                 grad_p = loss_stats["avg_grad_p"]
                 grad_b = loss_stats["avg_grad_b"]
 
-                if self.phys_weight and grad_p > 0.0:
-                    target_wp = grad_d / (grad_p + 1e-12)
-                    self.phys_weight = (
-                        1.0 - self.wt_ema
-                    ) * self.phys_weight + self.wt_ema * target_wp
+                if self.weight_scheme is not None:
+                    # User-supplied rule: (grad_d, grad_p, grad_b) -> (wp, wb).
+                    # The returned values are targets, smoothed below by the
+                    # same exponential moving average as the default rule.
+                    target_wp, target_wb = self.weight_scheme(grad_d, grad_p, grad_b)
 
-                if self.bnd_weight and grad_b > 0.0:
-                    target_wb = grad_d / (grad_b + 1e-12)
-                    self.bnd_weight = (
-                        1.0 - self.wt_ema
-                    ) * self.bnd_weight + self.wt_ema * target_wb
+                    if self.phys_weight:
+                        self.phys_weight = (
+                            1.0 - self.wt_ema
+                        ) * self.phys_weight + self.wt_ema * target_wp
+
+                    if self.bnd_weight:
+                        self.bnd_weight = (
+                            1.0 - self.wt_ema
+                        ) * self.bnd_weight + self.wt_ema * target_wb
+
+                else:
+                    if self.phys_weight and grad_p > 0.0:
+                        target_wp = grad_d / (grad_p + 1e-12)
+                        self.phys_weight = (
+                            1.0 - self.wt_ema
+                        ) * self.phys_weight + self.wt_ema * target_wp
+
+                    if self.bnd_weight and grad_b > 0.0:
+                        target_wb = grad_d / (grad_b + 1e-12)
+                        self.bnd_weight = (
+                            1.0 - self.wt_ema
+                        ) * self.bnd_weight + self.wt_ema * target_wb
 
             wt_phys.append(self.phys_weight)
             wt_bnd.append(self.bnd_weight)
