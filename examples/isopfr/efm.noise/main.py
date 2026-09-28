@@ -16,10 +16,6 @@ against labeled data perturbed by measurement noise.
 
 This is an example where labeled outputs are perturbed to emulate practical measurements,
 while the collocation datasets are unaffected, since they carry no measured values.
-Setting PHYSICS_ON to False sets the physics and boundary weights to zero,
-which reduces the total loss to the supervised data loss and recovers a conventional neural network;
-this provides a purely data-driven baseline trained on identical data, with an
-identical architecture and seed, so that the contribution of the enforced physics is isolated.
 """
 
 # ----------------------------- Run configuration -----------------------------
