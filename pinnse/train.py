@@ -421,7 +421,7 @@ class Training(object):
                     f"\tData Loss:     {loss_stats['data_loss']:.2e},"
                     f"\tPhysics Loss:  {loss_stats['phys_loss']:.2e},"
                     f"\tBoundary Loss: {loss_stats['bnd_loss']:.2e}"
-                    f"\033[0m]"
+                    f"\033[0m"
                 )
 
             if (

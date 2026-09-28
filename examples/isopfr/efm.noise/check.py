@@ -2,10 +2,10 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from sklearn.model_selection import train_test_split

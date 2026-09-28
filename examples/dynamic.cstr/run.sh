@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=CSTR.RNN
+#SBATCH --job-name=DYN.CSTR
 #SBATCH --nodes=1                           # Node count
 #SBATCH --ntasks=1                          # Total number of tasks across all nodes
 #SBATCH --cpus-per-task=1                   # cpu-cores per task (>1 if multi-threaded tasks)
