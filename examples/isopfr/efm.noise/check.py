@@ -172,14 +172,6 @@ def save_results(
     species: list[str],
     save_dir: str,
 ):
-    """
-    Save profile results to Excel.
-
-    Mirrors the EFM case, with two additional sheets: the aggregate errors on
-    the held-out test set against the clean labels, and a one-row summary of
-    this instance. The summary rows of the individual instances concatenate
-    directly into the comparison across noise levels.
-    """
     V_eval = I_S["V"].to_numpy()
 
     truth_sheet = pd.concat(
