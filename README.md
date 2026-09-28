@@ -1,12 +1,12 @@
 <div align="center">
 
-![pinnse logo](docs/logo.png)
+![pinnse logo](https://raw.githubusercontent.com/hverma99/pinnse/main/docs/logo.png)
 A modular PyTorch framework for building physics-informed neural-network surrogate models of chemical processes.
 
 [![PyPI version](https://img.shields.io/pypi/v/pinnse.svg)](https://pypi.org/project/pinnse/)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%E2%89%A52.0-ee4c2c)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hverma99/pinnse/blob/main/LICENSE)
 
 [Installation](#installation) · [Quick Start](#quick-start) · [Examples](#example-case-studies) · [Extending pinnse](#extending-pinnse-to-a-new-process) · [Citation](#citation)
 
@@ -32,6 +32,7 @@ A modular PyTorch framework for building physics-informed neural-network surroga
 - [Example Case Studies](#example-case-studies)
 - [Repository Structure](#repository-structure)
 - [Extending pinnse to a New Process](#extending-pinnse-to-a-new-process)
+- [Changelog](#changelog)
 - [Citation](#citation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -42,7 +43,7 @@ A modular PyTorch framework for building physics-informed neural-network surroga
 
 `pinnse` is a Python package that makes it straightforward to develop **physics-informed neural-network (PINN)** surrogate models for chemical process systems. It separates the reusable machine-learning infrastructure — data handling, normalization, neural-network construction, training, checkpointing, and visualization — from the process-specific ingredients that you define once for each system: operating bounds, governing equations, and residual formulations.
 
-![pinnse framework overview](docs/framework_overview.png)
+![pinnse framework overview](https://raw.githubusercontent.com/hverma99/pinnse/main/docs/framework_overview.png)
 
 The core idea is simple:
 
@@ -56,6 +57,8 @@ The repository includes ready-to-run examples covering:
 - **Isothermal plug-flow reactors** under multiple surrogate formulations (effluent flowrates, reaction extents, conversions)
 - **Inverse PINNs** for kinetic parameter estimation
 - **Nonisothermal plug-flow reactors** with coupled mass and energy balances
+- **Noisy measurement data**, comparing PINNs with purely data-driven networks trained on the same noisy labels
+- **Dynamic processes**, with a recurrent PINN that predicts the state trajectory of a nonisothermal CSTR
 
 ---
 
@@ -175,7 +178,7 @@ This will:
 - **Physics loss** — penalizes violations of governing equations (e.g., material balances, energy balances) evaluated at collocation points sampled across the input domain.
 - **Boundary loss** — enforces boundary or initial conditions (e.g., inlet conditions for a PFR at reactor volume = 0).
 
-The physics and boundary losses are weighted by tunable coefficients that can be fixed or updated adaptively during training based on gradient-norm balancing.
+The physics and boundary losses are weighted by tunable coefficients that can be fixed or updated adaptively during training, either by the built-in gradient-norm balancing or by a rule you supply. Alternatively, a gradient aggregator such as `PCGrad` can combine the individual loss gradients directly (see [Custom loss weighting and gradient aggregation](#custom-loss-weighting-and-gradient-aggregation)).
 
 Each example in the repository follows a consistent workflow, organized across a small set of files:
 
@@ -311,12 +314,13 @@ All public classes are importable directly from `pinnse`:
 
 ```python
 from pinnse import (
-    ANN, SANN, MultiHeadANN, Fourier_ANN,   # Architectures
-    DataModule,                              # Data loading
-    Training,                                # Training loop
+    ANN, SANN, MultiHeadANN, Fourier_ANN,   # Feedforward architectures
+    RecurrentANN,                            # Sequence architecture
+    DataModule, SequenceDataModule,          # Data loading
+    Training, PCGrad,                        # Training loop, gradient aggregation
     Plotter,                                 # Visualization
     Normalization, Denormalization,          # Scaling
-    Save, Analyze,                           # Utilities
+    Save, Analyze, Noise,                    # Utilities
 )
 ```
 
@@ -328,6 +332,9 @@ from pinnse import (
 | `SANN` | Same as `ANN` but applies `Softplus` to the output layer. | When outputs must be non-negative (concentrations, flowrates). |
 | `MultiHeadANN` | Shared trunk with multiple independent output heads. | When outputs group naturally (e.g., compositions vs. temperature) and benefit from shared representation with separate specialization. |
 | `Fourier_ANN` | Feedforward network with sinusoidal Fourier-feature embedding on the last input coordinate. | When the target function varies rapidly or has multi-scale behavior along one input dimension (e.g., reactor length). |
+| `RecurrentANN` | Recurrent sequence-to-sequence network (`cell="rnn"`, `"gru"` or `"lstm"`; stacked with `n_layers`) with an output head applied at each time step (`head_layers`). Maps inputs of shape `(batch, seq_len, in_dim)` to outputs of shape `(batch, seq_len, out_dim)`. | Dynamic processes, where the surrogate predicts a whole state trajectory from an initial condition and an input schedule. Use with `SequenceDataModule`. |
+
+`RecurrentANN` starts from a zero hidden state, so the initial condition must be supplied as input features (typically held constant along the sequence). Its forward pass takes a single tensor, so it works in the same `Training` loop as the feedforward networks.
 
 ### Data Handling (`pinnse/data.py`)
 
@@ -340,6 +347,42 @@ from pinnse import (
 | `bnd_colloc_loader()` | Generates boundary-collocation points with one input fixed (e.g., reactor volume = 0 for inlet conditions). |
 | `inspect_loader()` | Prints loader summary (batch shapes, number of batches). |
 | `save_loaders()` | Exports loader contents to Excel for inspection. |
+
+`SequenceDataModule` is the counterpart of `DataModule` for trajectory data, where each sample is a whole trajectory rather than an independent row.
+
+| Feature | Behavior |
+|---|---|
+| Input format | Normalized NumPy arrays of shape `(n_trajectories, seq_len, n_features)` for both `I_S_data` and `D_S_data`. |
+| `labeled_data_loader()` | Splits by whole trajectory, so no trajectory contributes to more than one of the train/validation/test partitions. `labeled_data_batch_size` counts trajectories. |
+| `phys_colloc_loader()` | Generates collocation *trajectories* by Latin Hypercube Sampling. Context features (constant along a trajectory, such as the initial condition) are sampled once per trajectory. Driving features (such as a coolant temperature) are sampled as `n_segments` levels and expanded into a piecewise-constant schedule. |
+| `context_cols` | Indices of the context features. If omitted, they are detected as the features that never vary within a trajectory. |
+
+With sequence data, the physics residual receives the input and output sequences, `x` of shape `(batch, seq_len, dim_in)` and `y` of shape `(batch, seq_len, dim_ot)`, so it can enforce a discrete-time relation between successive predicted states. There is no boundary-collocation loader: initial conditions enter through the context features.
+
+```python
+import torch.nn as nn
+from pinnse import RecurrentANN, SequenceDataModule
+
+# norm_I_S: (n_trajectories, 200, 3), features [CA_0, T_0, TC_k], normalized
+# norm_D_S: (n_trajectories, 200, 2), features [CA_k1, T_k1], normalized
+data = SequenceDataModule(
+    I_S_data=norm_I_S,
+    D_S_data=norm_D_S,
+    labeled_data_batch_size=64,     # trajectories per batch
+    physics_coll_data_size=1000,    # collocation trajectories
+    physics_coll_batch_size=64,
+    n_segments=4,                   # piecewise-constant coolant schedule
+    test_frac=0.1,
+    val_frac=0.1,
+)
+
+train_loader, val_loader, test_loader = data.labeled_data_loader()
+phys_coll_loader = data.phys_colloc_loader()
+
+model = RecurrentANN(in_dim=3, hidden_dim=64, out_dim=2, cell="gru", head_layers=[64])
+```
+
+The full workflow, including the unrolled discrete-time residual, is in `examples/dynamic.cstr`.
 
 ### Training (`pinnse/train.py`)
 
@@ -356,8 +399,38 @@ Key constructor parameters:
 | Parameter | Description |
 |---|---|
 | `phys_weight`, `bnd_weight` | Scalar weights for physics and boundary losses. Set to `0.0` to disable. |
-| `adapt_wts` | If `True`, automatically adjusts `phys_weight` and `bnd_weight` every few epochs based on gradient-norm balancing. |
+| `adapt_wts` | If `True`, automatically adjusts `phys_weight` and `bnd_weight` every 10 epochs based on gradient-norm balancing. Requires both weights to be nonzero. |
 | `theta` | An `nn.Parameter` for inverse problems — trainable physical parameters (e.g., activation energies) that are optimized alongside network weights. |
+| `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True` and both weights are nonzero. |
+| `grad_aggregator` | Optional callable that combines the per-loss gradients itself, replacing the default weighted-sum update. `PCGrad()` is provided. |
+
+#### Custom loss weighting and gradient aggregation
+
+By default, with `adapt_wts=True`, every 10 epochs each weight is moved toward the ratio of the data-loss gradient norm to its own loss's gradient norm, smoothed by an exponential moving average (factor 0.1). To use a different rule, pass `weight_scheme`. It receives the average gradient norms of the data, physics and boundary losses over the last epoch, and returns target physics and boundary weights, which are smoothed by the same moving average:
+
+```python
+def capped_ratio(grad_d, grad_p, grad_b):
+    # Gradient-norm balancing, capped at 100
+    w_phys = min(grad_d / (grad_p + 1e-12), 100.0)
+    w_bnd = min(grad_d / (grad_b + 1e-12), 100.0)
+    return w_phys, w_bnd
+
+training = Training(..., phys_weight=1.0, bnd_weight=1.0, adapt_wts=True, weight_scheme=capped_ratio)
+```
+
+Adaptive weighting, built-in or custom, runs only when both `phys_weight` and `bnd_weight` are nonzero. With a single residual loss (for example `bnd_weight=0.0`), the weights stay fixed. Guard divisions against zero gradient norms, as above.
+
+Gradient-norm weighting balances only the *magnitudes* of the loss gradients. `PCGrad` (Yu et al., 2020) also resolves conflicts in their *directions*: whenever two loss gradients have a negative inner product, each is projected onto the normal plane of the other before they are summed.
+
+```python
+from pinnse import Training, PCGrad
+
+training = Training(..., phys_weight=1.0, bnd_weight=1.0, grad_aggregator=PCGrad())
+```
+
+With `PCGrad(apply_weights=True)` (the default), each loss is scaled by its current weight before its gradient is computed. With `apply_weights=False`, the raw losses are used, and nonzero weights only switch losses on. In inverse problems, the aggregated gradient is applied to `theta` as well as to the network parameters.
+
+Any other multi-objective strategy can be supplied as `grad_aggregator` without modifying `pinnse`. It is called on every batch as `aggregator(losses, weights, params)`, where `losses` and `weights` are dictionaries keyed by `"data"`, `"physics"` and `"boundary"` (an absent loss is `None`). It must set `p.grad` for every tensor in `params` and return the scalar total loss for logging.
 
 ### Normalization and Utilities (`pinnse/utils.py`)
 
@@ -367,6 +440,29 @@ Key constructor parameters:
 | `Denormalization` | Inverse transforms to recover dimensional predictions from normalized model outputs. |
 | `Analyze` | Load a trained model checkpoint, evaluate predictions, and compute error metrics (MAE, RMSE, R²). |
 | `Save` | Write training histories or results to Excel (`.xlsx`) or CSV files. |
+| `Noise` | Measurement-noise models that perturb a labelled dataset so it emulates plant or experimental measurements. |
+
+`Noise.gaussian` adds zero-mean Gaussian noise to the labelled outputs only. The collocation datasets are unaffected, since they carry no measured values. Three noise models are available:
+
+| `mode` | Standard deviation | Typical use |
+|---|---|---|
+| `"relative"` (default) | `noise_level × std(column)` | Same noise for every sample, scaled by the spread of each variable. |
+| `"proportional"` | `noise_level × \|value\|` | Noise that grows with the measured magnitude, typical of flow and composition sensors. |
+| `"absolute"` | `noise_level` | Noise in the units of the column. |
+
+```python
+from pinnse import Noise
+
+D_S_noisy, noise_metrics = Noise.gaussian(
+    data=D_S_data,          # labelled outputs (DataFrame)
+    noise_level=0.05,       # a float, or a dict {column: level}
+    mode="relative",
+    clip_min=0.0,           # keep flowrates non-negative
+    random_state=42,
+)
+```
+
+`noise_cols` restricts the noise to selected columns. `noise_metrics` records the mode, level and realized standard deviation of each column. Compute the normalization metrics from the noisy data, since that is the data available in practice (see `examples/isopfr/efm.noise`).
 
 ### Visualization (`pinnse/plots.py`)
 
@@ -415,7 +511,9 @@ All examples are in the `examples/` directory. Each contains a complete, self-co
 | `examples/isopfr/cm/s0` | Isothermal PFR — conversion model (baseline). | ODE in terms of conversions |
 | `examples/isopfr/cm/s1` | Isothermal PFR — conversion model with LR scheduling. | Same as s0 with `StepLR` scheduler (step=5000, γ=0.75) |
 | `examples/isopfr/efm.inverse` | Inverse PINN for parameter estimation. | Estimates activation energies from data using trainable `nn.Parameter` |
+| `examples/isopfr/efm.noise` | Isothermal PFR (EFM) trained on labelled outputs perturbed by Gaussian measurement noise (`Noise.gaussian`). Setting `phys_weight` and `bnd_weight` to `0.0` gives a purely data-driven baseline with the same data, architecture and seed. | Same as `efm`; `check.py` evaluates against the clean labels and the first-principles profile |
 | `examples/nonisopfr` | Nonisothermal PFR with coupled mass and energy balances. | Coupled ODEs: mass balance + energy balance with heat exchange |
+| `examples/dynamic.cstr` | Recurrent PINN (`RecurrentANN`, `SequenceDataModule`) for a nonisothermal CSTR: predicts the state trajectory (concentration and temperature over 200 steps) from an initial condition and a piecewise-constant coolant schedule. `check.py` compares it with a per-step feedforward network, an autoregressive single-transition model, and the best accuracy any function of the instantaneous input can reach. | Unrolled discrete-time residual between successive predicted states; `SCHEME` selects Euler, backward Euler, trapezoid or RK4, and `CELL` selects RNN, GRU or LSTM |
 
 Each example directory typically contains:
 
@@ -425,7 +523,7 @@ Each example directory typically contains:
 | `phys_res.py` | Physics and boundary residual definitions |
 | `data_gen.py` | Dataset generation script |
 | `check.py` | Post-training evaluation and comparison |
-| `pfr_model.py` | Process model helper functions (where applicable) |
+| `pfr_model.py` / `cstr_model.py` | Process model helper functions (where applicable) |
 | `I_S_data.xlsx` | Labelled input data |
 | `D_S_data.xlsx` | Labelled output data |
 | `run.sh` | Convenience shell script |
@@ -454,8 +552,10 @@ pinnse/
 │   │   ├── efm/               #   Effluent flowrate model
 │   │   ├── erm/               #   Extent of reaction model
 │   │   ├── cm/                #   Conversion model (s0: baseline, s1: with LR scheduler)
-│   │   └── efm.inverse/       #   Inverse PINN for parameter estimation
-│   └── nonisopfr/             # Nonisothermal PFR example
+│   │   ├── efm.inverse/       #   Inverse PINN for parameter estimation
+│   │   └── efm.noise/         #   EFM trained on noisy labelled data
+│   ├── nonisopfr/             # Nonisothermal PFR example
+│   └── dynamic.cstr/          # Recurrent PINN for a dynamic CSTR
 ├── docs/                      # Logo and framework figure
 ├── pyproject.toml             # Package metadata and dependencies
 ├── LICENSE                    # MIT License
@@ -476,6 +576,8 @@ To apply `pinnse` to your own unit operation or process, follow these steps.
 4. **Define boundary residuals** (if applicable). For ODEs, this is typically the initial or inlet condition.
 5. **Write `main.py`.** Configure the architecture, data loaders, optimizer, scheduler, loss weights, and call `Training.adam_step()`.
 6. **Train and evaluate.** Run `main.py` to train; write a `check.py` script to load the checkpoint and compare predictions against reference solutions.
+
+> **Dynamic processes:** use `RecurrentANN` with `SequenceDataModule`. The residual then receives sequences of shape `(batch, seq_len, n_features)` rather than the `(batch_size, n_inputs)` batches in the template below. See `examples/dynamic.cstr`.
 
 ### Template: minimal `phys_res.py`
 
@@ -533,6 +635,28 @@ class Boundary:
 
 ---
 
+## Changelog
+
+### 0.1.0
+
+**Breaking change**
+
+- `BranchedANN` is renamed `MultiHeadANN`. The constructor arguments are unchanged, so replacing the name is the only change needed:
+  ```python
+  from pinnse import MultiHeadANN   # was: from pinnse import BranchedANN
+  ```
+
+**Added**
+
+- `RecurrentANN`: recurrent (RNN, GRU or LSTM) sequence-to-sequence architecture for dynamic processes.
+- `SequenceDataModule`: data loaders for trajectory data, with splits by whole trajectory and piecewise-constant collocation trajectories.
+- `Training(grad_aggregator=...)` for strategies that combine the per-loss gradients directly, with `PCGrad` as a ready-to-use implementation.
+- `Training(weight_scheme=...)` for user-supplied adaptive-weighting rules.
+- `Noise.gaussian` for perturbing labelled data with relative, proportional or absolute measurement noise.
+- Examples: `examples/dynamic.cstr` (recurrent PINN for a nonisothermal CSTR) and `examples/isopfr/efm.noise` (PINN vs. data-driven training on noisy data).
+
+---
+
 ## Citation
 
 If you use `pinnse`, please cite the associated paper:
@@ -558,4 +682,4 @@ Please open an issue first for large changes or new features to discuss the appr
 
 ## License
 
-This project is released under the **MIT License**. See [LICENSE](LICENSE) for details.
+This project is released under the **MIT License**. See [LICENSE](https://github.com/hverma99/pinnse/blob/main/LICENSE) for details.
