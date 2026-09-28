@@ -32,7 +32,6 @@ A modular PyTorch framework for building physics-informed neural-network surroga
 - [Example Case Studies](#example-case-studies)
 - [Repository Structure](#repository-structure)
 - [Extending pinnse to a New Process](#extending-pinnse-to-a-new-process)
-- [Changelog](#changelog)
 - [Citation](#citation)
 - [Contributing](#contributing)
 - [License](#license)
