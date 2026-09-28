@@ -3,7 +3,7 @@
 ![pinnse logo](https://raw.githubusercontent.com/hverma99/pinnse/main/docs/logo.png)
 A modular PyTorch framework for building physics-informed neural-network surrogate models of chemical processes.
 
-[![PyPI version](https://img.shields.io/pypi/v/pinnse.svg)](https://pypi.org/project/pinnse/)
+[![PyPI version](https://img.shields.io/pypi/v/pinnse?label=PyPI)](https://pypi.org/project/pinnse/)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%E2%89%A52.0-ee4c2c)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hverma99/pinnse/blob/main/LICENSE)
