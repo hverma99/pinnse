@@ -1,0 +1,2 @@
+# Shell scripts run on Linux clusters (sbatch rejects CRLF line endings)
+*.sh text eol=lf
