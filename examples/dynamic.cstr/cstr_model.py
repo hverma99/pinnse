@@ -30,10 +30,7 @@ deltaT = 0.005
 SEQ_LEN = 200  # steps; SEQ_LEN * deltaT = 1.0 min = one residence time
 N_SEG = 4  # piecewise-constant segments of the coolant schedule
 
-# Operating bounds for trajectory sampling. This reactor admits multiple
-# steady states (at TC = 300 K: 324.5 K stable, 350.0 K unstable, 369.7 K
-# stable), and trajectories crossing the unstable branch run away to about
-# 580 K, so the envelope stays on the low-temperature branch.
+# Operating bounds for trajectory sampling.
 bounds = {
     "CA_0": (0.20, 0.60),  # initial concentration of A, mol/L
     "T_0": (330.0, 345.0),  # initial reactor temperature, K
