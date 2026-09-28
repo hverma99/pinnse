@@ -32,6 +32,16 @@ class DataModule:
         self.val_frac = val_frac
         self.random_state = random_state
 
+        # Partition the labeled rows once, and expose the row indices of each
+        # partition so evaluation scripts can reuse the split instead of rebuilding it
+        idx = np.arange(len(I_S_data))
+        idx_tv, self.idx_test = train_test_split(
+            idx, test_size=self.test_frac, random_state=self.random_state
+        )
+        self.idx_train, self.idx_val = train_test_split(
+            idx_tv, test_size=self.val_frac, random_state=self.random_state
+        )
+
     def labeled_data_loader(self):
         """
         Construct labeled DataLoaders for training, validation, and test datasets.
@@ -51,6 +61,11 @@ class DataModule:
 
         test_loader : torch.utils.data.DataLoader
             DataLoader containing the test subset.
+
+        Notes
+        -----
+        - The partitions follow the row indices `idx_train`, `idx_val` and
+          `idx_test`, fixed when the DataModule is constructed.
         """
         X = self.I_S_data.to_numpy(dtype=np.float32)
         Y = self.D_S_data.to_numpy(dtype=np.float32)
@@ -58,12 +73,9 @@ class DataModule:
         self.lower_bnd = X.min(axis=0)
         self.upper_bnd = X.max(axis=0)
 
-        X_tv, X_test, Y_tv, Y_test = train_test_split(
-            X, Y, test_size=self.test_frac, random_state=self.random_state
-        )
-        X_train, X_val, Y_train, Y_val = train_test_split(
-            X_tv, Y_tv, test_size=self.val_frac, random_state=self.random_state
-        )
+        X_train, Y_train = X[self.idx_train], Y[self.idx_train]
+        X_val, Y_val = X[self.idx_val], Y[self.idx_val]
+        X_test, Y_test = X[self.idx_test], Y[self.idx_test]
 
         def make_loader(
             X: np.ndarray,
@@ -348,11 +360,25 @@ class SequenceDataModule:
     context_cols : list[int], optional
         Indices of the input features that stay constant along a trajectory,
         such as an initial condition carried as a context feature. If omitted,
-        they are detected from the labeled data.
+        they are detected from the labeled data, up to `tol`.
+
+    shared_cols : list[int], optional
+        Indices of the input features that follow the same profile in every
+        trajectory, such as a time or step index. Collocation trajectories copy
+        this profile rather than sampling it. If omitted, they are detected
+        from the labeled data, up to `tol`.
 
     n_segments : int, optional, default=1
         Number of piecewise-constant segments used when sampling the remaining
-        (driving) input features for collocation.
+        (driving) input features for collocation. Driving inputs of any other
+        shape, such as ramps that differ between trajectories, are not
+        represented by this sampler; pass a custom collocation DataLoader to
+        `Training` in that case.
+
+    tol : float, optional, default=1e-6
+        Tolerance, relative to each feature's range, used when detecting
+        context and shared features, which absorbs float round-off in values
+        that are repeated along or across trajectories.
 
     test_frac : float, optional
         Fraction of trajectories held out as the test partition.
@@ -376,6 +402,8 @@ class SequenceDataModule:
         test_frac: Optional[float] = None,
         val_frac: Optional[float] = None,
         random_state: Optional[int] = 42,
+        shared_cols: Optional[list[int]] = None,
+        tol: float = 1e-6,
     ):
         I_S_data = np.asarray(I_S_data)
         D_S_data = np.asarray(D_S_data)
@@ -409,13 +437,24 @@ class SequenceDataModule:
             axis=(0, 1)
         )
 
+        span = self.upper_bnd - self.lower_bnd
+
         # initial & boundary conditions are held constant when sampling collocation
         if context_cols is None:
             spread = (I_S_data.max(axis=1) - I_S_data.min(axis=1)).max(axis=0)
-            context_cols = np.flatnonzero(spread == 0).tolist()
+            context_cols = np.flatnonzero(spread <= tol * span).tolist()
         self.context_cols = list(context_cols)
+
+        # profiles common to every trajectory (e.g. time) are copied, not sampled
+        if shared_cols is None:
+            spread = (I_S_data.max(axis=0) - I_S_data.min(axis=0)).max(axis=0)
+            shared_cols = np.flatnonzero(spread <= tol * span).tolist()
+        self.shared_cols = [j for j in shared_cols if j not in self.context_cols]
+
         self.driving_cols = [
-            j for j in range(self.dim_in) if j not in self.context_cols
+            j
+            for j in range(self.dim_in)
+            if j not in self.context_cols and j not in self.shared_cols
         ]
 
         # Partition by whole trajectory
@@ -487,7 +526,8 @@ class SequenceDataModule:
         Notes
         -----
         - Context features are sampled once per trajectory and held constant
-          along it; driving features are sampled as `n_segments` levels and
+          along it; shared features copy the profile common to the labeled
+          trajectories; driving features are sampled as `n_segments` levels and
           expanded into a piecewise-constant schedule.
         - All features are sampled using Latin Hypercube Sampling
         """
@@ -509,6 +549,9 @@ class SequenceDataModule:
         for i, col in enumerate(self.context_cols):
             lb, ub = self.lower_bnd[col], self.upper_bnd[col]
             X_coll[:, :, col] = (lb + unit[:, i] * (ub - lb))[:, None]
+
+        for col in self.shared_cols:
+            X_coll[:, :, col] = self.I_S_data[0, :, col]
 
         per_seg = int(np.ceil(self.seq_len / self.n_segments))
         for i, col in enumerate(self.driving_cols):

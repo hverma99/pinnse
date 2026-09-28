@@ -353,8 +353,10 @@ from pinnse import (
 |---|---|
 | Input format | Normalized NumPy arrays of shape `(n_trajectories, seq_len, n_features)` for both `I_S_data` and `D_S_data`. |
 | `labeled_data_loader()` | Splits by whole trajectory, so no trajectory contributes to more than one of the train/validation/test partitions. `labeled_data_batch_size` counts trajectories. |
-| `phys_colloc_loader()` | Generates collocation *trajectories* by Latin Hypercube Sampling. Context features (constant along a trajectory, such as the initial condition) are sampled once per trajectory. Driving features (such as a coolant temperature) are sampled as `n_segments` levels and expanded into a piecewise-constant schedule. |
-| `context_cols` | Indices of the context features. If omitted, they are detected as the features that never vary within a trajectory. |
+| `phys_colloc_loader()` | Generates collocation *trajectories* by Latin Hypercube Sampling. Context features (constant along a trajectory, such as the initial condition) are sampled once per trajectory. Shared features (the same profile in every trajectory, such as time) are copied from the labelled data. Driving features (such as a coolant temperature) are sampled as `n_segments` levels and expanded into a piecewise-constant schedule. |
+| `context_cols`, `shared_cols` | Indices of the context and shared features. If omitted, they are detected from the labelled data, to within a tolerance `tol` (default `1e-6`) relative to each feature's range. |
+
+Driving inputs that are not piecewise constant, such as ramps that differ between trajectories, are not represented by this sampler. In that case, build the collocation `DataLoader` yourself and pass it to `Training` as `phys_coll_loader`.
 
 With sequence data, the physics residual receives the input and output sequences, `x` of shape `(batch, seq_len, dim_in)` and `y` of shape `(batch, seq_len, dim_ot)`, so it can enforce a discrete-time relation between successive predicted states. There is no boundary-collocation loader: initial conditions enter through the context features.
 
@@ -398,10 +400,13 @@ Key constructor parameters:
 | Parameter | Description |
 |---|---|
 | `phys_weight`, `bnd_weight` | Scalar weights for physics and boundary losses. Set to `0.0` to disable. |
-| `adapt_wts` | If `True`, automatically adjusts `phys_weight` and `bnd_weight` every 10 epochs based on gradient-norm balancing. Requires both weights to be nonzero. |
+| `adapt_wts` | If `True`, automatically adjusts `phys_weight` and `bnd_weight` every 10 epochs based on gradient-norm balancing. Each weight adapts while its loss is active; a weight set to `0.0` stays off. |
 | `theta` | An `nn.Parameter` for inverse problems — trainable physical parameters (e.g., activation energies) that are optimized alongside network weights. |
-| `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True` and both weights are nonzero. |
+| `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True`. |
 | `grad_aggregator` | Optional callable that combines the per-loss gradients itself, replacing the default weighted-sum update. `PCGrad()` is provided. |
+| `track_grad_norms` | Record the gradient norm of each loss every epoch (default `True`), for the gradient-history plots. Each norm costs an extra backward pass per batch, so set `False` to train faster when `adapt_wts=False`; the histories are then recorded as zeros and their plots are skipped. |
+
+The best checkpoint is the one with the lowest validation total, computed with the `phys_weight` and `bnd_weight` given at construction. This keeps the total comparable across epochs while adaptive weighting changes the weights.
 
 #### Custom loss weighting and gradient aggregation
 
@@ -417,7 +422,7 @@ def capped_ratio(grad_d, grad_p, grad_b):
 training = Training(..., phys_weight=1.0, bnd_weight=1.0, adapt_wts=True, weight_scheme=capped_ratio)
 ```
 
-Adaptive weighting, built-in or custom, runs only when both `phys_weight` and `bnd_weight` are nonzero. With a single residual loss (for example `bnd_weight=0.0`), the weights stay fixed. Guard divisions against zero gradient norms, as above.
+Each weight is updated only while its loss is active, that is, while both its weight and its gradient norm are nonzero. An absent loss, such as the boundary loss when `bnd_weight=0.0`, has gradient norm 0, and the target returned for it is ignored. Guard divisions against zero gradient norms, as above.
 
 Gradient-norm weighting balances only the *magnitudes* of the loss gradients. `PCGrad` (Yu et al., 2020) also resolves conflicts in their *directions*: whenever two loss gradients have a negative inner product, each is projected onto the normal plane of the other before they are summed.
 
@@ -461,7 +466,7 @@ D_S_noisy, noise_metrics = Noise.gaussian(
 )
 ```
 
-`noise_cols` restricts the noise to selected columns. `noise_metrics` records the mode, level and realized standard deviation of each column. Compute the normalization metrics from the noisy data, since that is the data available in practice (see `examples/isopfr/efm.noise`).
+`noise_cols` restricts the noise to selected columns. With a dict `noise_level` and no `noise_cols`, only the columns named in the dict are perturbed. `noise_metrics` records the mode, level and realized standard deviation of each column. Compute the normalization metrics from the noisy data, since that is the data available in practice (see `examples/isopfr/efm.noise`).
 
 ### Visualization (`pinnse/plots.py`)
 

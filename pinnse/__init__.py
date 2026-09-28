@@ -1,4 +1,4 @@
-from .PINNs import ANN, SANN, MultiHeadANN, Fourier_ANN, RecurrentANN
+from .PINNs import ANN, SANN, MultiHeadANN, BranchedANN, Fourier_ANN, RecurrentANN
 from .data import DataModule, SequenceDataModule, DataLoader
 from .train import Training, PCGrad
 from .plots import Plotter
@@ -8,6 +8,7 @@ __all__ = [
     "ANN",
     "SANN",
     "MultiHeadANN",
+    "BranchedANN",
     "Fourier_ANN",
     "RecurrentANN",
     "DataModule",

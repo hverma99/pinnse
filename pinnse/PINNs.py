@@ -1,3 +1,4 @@
+import warnings
 import torch.nn as nn
 import torch
 
@@ -192,6 +193,21 @@ class MultiHeadANN(nn.Module):
         h = self.trunk(x)
         outputs = {name: head(h) for name, head in self.heads.items()}
         return outputs
+
+
+class BranchedANN(MultiHeadANN):
+    """
+    Deprecated alias of `MultiHeadANN`, its name before pinnse 0.1.0. The
+    architecture and state-dict keys are identical, so existing checkpoints load.
+    """
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "BranchedANN is renamed MultiHeadANN and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class Fourier_ANN(nn.Module):

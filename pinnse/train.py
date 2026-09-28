@@ -138,6 +138,7 @@ class Training(object):
         theta: Optional[torch.nn.Parameter] = None,
         grad_aggregator: Optional[Callable] = None,
         weight_scheme: Optional[Callable] = None,
+        track_grad_norms: bool = True,
     ):
 
         self.model = model
@@ -159,6 +160,13 @@ class Training(object):
         self.theta = theta
         self.grad_aggregator = grad_aggregator
         self.weight_scheme = weight_scheme
+        self.track_grad_norms = track_grad_norms
+
+        # Adaptive weighting changes phys_weight and bnd_weight during training, so the
+        # best checkpoint is selected on a validation total that uses the weights given
+        # at construction, which keeps it comparable across epochs.
+        self.ckpt_phys_weight = phys_weight
+        self.ckpt_bnd_weight = bnd_weight
 
         self.wt_update_every = 10
         self.wt_ema = 0.1
@@ -201,6 +209,14 @@ class Training(object):
         else:
             norm = torch.tensor(0.0, device=self.device)
         return norm
+
+    @staticmethod
+    def grad_norm_ratio(grad_d, grad_p, grad_b):
+        """
+        Default adaptive-weight rule: the data-loss gradient norm divided by the
+        gradient norm of each residual loss, returned as target weights (wp, wb).
+        """
+        return grad_d / (grad_p + 1e-12), grad_d / (grad_b + 1e-12)
 
     def train_epoch(self):
         self.model.train()
@@ -252,14 +268,13 @@ class Training(object):
                 bnd_coll_size = 0
                 lb = None
 
-            norm_data_loss = self.grad_norm(ld)
-            norm_phys_loss = self.grad_norm(lp)
-            norm_bnd_loss = self.grad_norm(lb)
-
-            grad_d_sum += norm_data_loss.item()
-            grad_p_sum += norm_phys_loss.item()
-            grad_b_sum += norm_bnd_loss.item()
-            grad_count += 1
+            # Each norm costs an extra backward pass, so they are computed only when the
+            # adaptive weights need them or their history is being recorded.
+            if self.adapt_wts or self.track_grad_norms:
+                grad_d_sum += self.grad_norm(ld).item()
+                grad_p_sum += self.grad_norm(lp).item()
+                grad_b_sum += self.grad_norm(lb).item()
+                grad_count += 1
 
             if self.grad_aggregator is not None:
                 self.optimizer.zero_grad()
@@ -424,44 +439,26 @@ class Training(object):
                     f"\033[0m"
                 )
 
-            if (
-                self.adapt_wts
-                and (epoch % self.wt_update_every == 0)
-                and self.phys_weight != 0
-                and self.bnd_weight != 0
-            ):
+            if self.adapt_wts and (epoch % self.wt_update_every == 0):
                 grad_d = loss_stats["avg_grad_d"]
                 grad_p = loss_stats["avg_grad_p"]
                 grad_b = loss_stats["avg_grad_b"]
 
-                if self.weight_scheme is not None:
-                    # User-supplied rule: (grad_d, grad_p, grad_b) -> (wp, wb).
-                    # The returned values are targets, smoothed below by the
-                    # same exponential moving average as the default rule.
-                    target_wp, target_wb = self.weight_scheme(grad_d, grad_p, grad_b)
+                # The rule, (grad_d, grad_p, grad_b) -> (wp, wb), returns target weights,
+                # which are smoothed by an exponential moving average. Each weight is
+                # updated only while its loss is active: nonzero weight and gradient norm.
+                scheme = self.weight_scheme or self.grad_norm_ratio
+                target_wp, target_wb = scheme(grad_d, grad_p, grad_b)
 
-                    if self.phys_weight:
-                        self.phys_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.phys_weight + self.wt_ema * target_wp
+                if self.phys_weight and grad_p > 0.0:
+                    self.phys_weight = (
+                        1.0 - self.wt_ema
+                    ) * self.phys_weight + self.wt_ema * target_wp
 
-                    if self.bnd_weight:
-                        self.bnd_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.bnd_weight + self.wt_ema * target_wb
-
-                else:
-                    if self.phys_weight and grad_p > 0.0:
-                        target_wp = grad_d / (grad_p + 1e-12)
-                        self.phys_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.phys_weight + self.wt_ema * target_wp
-
-                    if self.bnd_weight and grad_b > 0.0:
-                        target_wb = grad_d / (grad_b + 1e-12)
-                        self.bnd_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.bnd_weight + self.wt_ema * target_wb
+                if self.bnd_weight and grad_b > 0.0:
+                    self.bnd_weight = (
+                        1.0 - self.wt_ema
+                    ) * self.bnd_weight + self.wt_ema * target_wb
 
             wt_phys.append(self.phys_weight)
             wt_bnd.append(self.bnd_weight)
@@ -471,6 +468,11 @@ class Training(object):
                 val_data, val_phys, val_bnd = self.validate_test(loader=self.val_loader)
                 val_total = (
                     val_data + self.phys_weight * val_phys + self.bnd_weight * val_bnd
+                )
+                val_select = (
+                    val_data
+                    + self.ckpt_phys_weight * val_phys
+                    + self.ckpt_bnd_weight * val_bnd
                 )
                 val_loss_t.append(val_total)
                 val_loss_d.append(val_data)
@@ -485,8 +487,8 @@ class Training(object):
                         f"\tBoundary Loss: {val_bnd:.2e}"
                         f"\033[0m"
                     )
-                if val_total < best_total:
-                    best_total = val_total
+                if val_select < best_total:
+                    best_total = val_select
                     torch.save(
                         {"model_state_dict": self.model.state_dict()}, self.ckpt_path
                     )
@@ -497,7 +499,7 @@ class Training(object):
                 if self.scheduler is not None and isinstance(
                     self.scheduler, ReduceLROnPlateau
                 ):
-                    self.scheduler.step(val_total)
+                    self.scheduler.step(val_select)
 
             if self.scheduler is not None and not isinstance(
                 self.scheduler, ReduceLROnPlateau

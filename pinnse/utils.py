@@ -770,8 +770,9 @@ class Noise:
         data : pd.DataFrame
             Labeled dataset to perturb (typically D_S, the dependent outputs).
         noise_level : float or dict[str, float]
-            Noise level. A scalar applies the same level to every noisedcolumn;
-            a dictionary specifies the level per column name.
+            Noise level. A scalar applies the same level to every noised column;
+            a dictionary specifies the level per column name, and by default
+            only the columns it names are perturbed.
         mode : str, optional, default="relative"
             Noise model:
             - "relative"     : sigma = noise_level * std(column), homoscedastic
@@ -781,7 +782,8 @@ class Noise:
                                typical of flow and composition sensors.
             - "absolute"     : sigma = noise_level, in the units of the column.
         noise_cols : list[str], optional
-            Columns to perturb. If None, all columns are perturbed.
+            Columns to perturb. If None, the keys of a dictionary noise_level,
+            or all columns for a scalar noise_level.
         clip_min : float, optional
             If given, perturbed values are clipped below at this value, e.g.
             0.0 to keep non-negative quantities such as flowrates physical.
@@ -802,7 +804,20 @@ class Noise:
 
         rng = np.random.default_rng(random_state)
         data_noisy, metrics = data.copy(), {}
-        cols = noise_cols if noise_cols is not None else list(data.columns)
+        if noise_cols is not None:
+            cols = list(noise_cols)
+        elif isinstance(noise_level, dict):
+            cols = list(noise_level)
+        else:
+            cols = list(data.columns)
+
+        if isinstance(noise_level, dict):
+            missing = [col for col in cols if col not in noise_level]
+            if missing:
+                raise KeyError(f"noise_level has no entry for columns: {missing}")
+        unknown = [col for col in cols if col not in data.columns]
+        if unknown:
+            raise KeyError(f"Columns not found in data: {unknown}")
 
         for col in cols:
             level = (
