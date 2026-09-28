@@ -8,13 +8,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from sklearn.model_selection import train_test_split
 
 from data_gen import species, nu, key_species, k, E
 from pfr_model import EFM
 from phys_res import Physics
-from pinnse import Normalization, Analyze, Noise
-from main import NOISE_LEVEL, NOISE_MODE, NOISE_SEED
+from pinnse import Normalization, Analyze, Noise, DataModule
+from main import NOISE_LEVEL, NOISE_MODE, NOISE_SEED, TEST_FRAC, VAL_FRAC, SPLIT_SEED
 
 """
 Evaluation for the noisy-data EFM study.
@@ -30,16 +29,6 @@ The physics residual is evaluated in both cases, including for the data-only
 baseline, where it quantifies the extent to which an unconstrained model
 violates the governing material balances.
 """
-
-
-def test_split_indices(n_samples: int):
-    """
-    Reproduce the held-out test partition used by DataModule.
-    """
-    idx = np.arange(n_samples)
-    idx_tv, idx_test = train_test_split(idx, test_size=0.1, random_state=42)
-    _, _ = train_test_split(idx_tv, test_size=0.1, random_state=42)
-    return idx_test
 
 
 def build_profile_inputs(
@@ -235,7 +224,15 @@ if __name__ == "__main__":
     physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
 
     # ---------- 1. Aggregate errors on the held-out test set vs CLEAN labels ----------
-    idx_test = test_split_indices(len(I_S_data))
+    # The partition depends only on the row count and main.py's split settings
+    idx_test = DataModule(
+        I_S_data=I_S_data,
+        D_S_data=D_S_data,
+        labeled_data_batch_size=1,
+        test_frac=TEST_FRAC,
+        val_frac=VAL_FRAC,
+        random_state=SPLIT_SEED,
+    ).idx_test
     I_S_test = I_S_data.iloc[idx_test].reset_index(drop=True)
     D_S_test_clean = D_S_data.iloc[idx_test].reset_index(drop=True)
 

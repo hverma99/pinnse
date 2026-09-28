@@ -44,14 +44,7 @@ class Physics:
         ]
 
     def _f(self, CA: torch.Tensor, T: torch.Tensor, TC: torch.Tensor):
-        rate = cstr.k0 * torch.exp(-cstr.E_over_R / T) * CA
-        dCA_dt = (cstr.q / cstr.V) * (cstr.CA_f - CA) - rate
-        dT_dt = (
-            (cstr.q / cstr.V) * (cstr.T_f - T)
-            + ((-cstr.dH) / (cstr.rho * cstr.Cp)) * rate
-            + (cstr.UA / (cstr.V * cstr.rho * cstr.Cp)) * (TC - T)
-        )
-        return dCA_dt, dT_dt
+        return cstr.derivatives(CA, T, TC, exp=torch.exp)
 
     def _increment(
         self,
@@ -76,15 +69,7 @@ class Physics:
             a_k1, b_k1 = self._f(CA_k1, T_k1, TC_k)
             return 0.5 * (a_k + a_k1), 0.5 * (b_k + b_k1)
 
-        h = self.dt
-        k1_CA, k1_T = self._f(CA_k, T_k, TC_k)
-        k2_CA, k2_T = self._f(CA_k + 0.5 * h * k1_CA, T_k + 0.5 * h * k1_T, TC_k)
-        k3_CA, k3_T = self._f(CA_k + 0.5 * h * k2_CA, T_k + 0.5 * h * k2_T, TC_k)
-        k4_CA, k4_T = self._f(CA_k + h * k3_CA, T_k + h * k3_T, TC_k)
-
-        phi_CA = (k1_CA + 2.0 * k2_CA + 2.0 * k3_CA + k4_CA) / 6.0
-        phi_T = (k1_T + 2.0 * k2_T + 2.0 * k3_T + k4_T) / 6.0
-        return phi_CA, phi_T
+        return cstr.rk4_increment(CA_k, T_k, TC_k, self.dt, exp=torch.exp)
 
     def physics_residual(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """

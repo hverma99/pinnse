@@ -16,9 +16,10 @@ Four models predict the same held-out trajectories, over the same horizon,
 from the same initial condition and coolant schedule, and are scored against
 the same reference:
 
-    bound           the best any function of the instantaneous input can do,
-                    obtained analytically by predicting each group of identical
-                    inputs with the mean of its own labels. No training.
+    bound           the lowest mean absolute error any function of the
+                    instantaneous input can reach, obtained analytically by
+                    predicting each group of identical inputs with the median
+                    of its own labels. No training.
     per-step        a feedforward network on the recurrent model's inputs,
                     applied independently at each step.
     autoregressive  a feedforward model of a single transition, which is given
@@ -36,13 +37,13 @@ AR_D_S_keys = cstr.D_S_keys
 
 
 # ============================== shared helpers ===============================
-def load_recurrent(device):
+def load_recurrent(I_S_metrics, D_S_metrics, device):
     """Rebuild the architecture used in training and load the best checkpoint."""
-    model, physics, _, _, I_S_metrics, D_S_metrics = M.build(device)
+    model = M.make_model(device)
     ckpt = torch.load("./logs/best_model.pth", map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
-    return model, physics
+    return model, Physics(I_S_metrics, D_S_metrics, scheme=M.SCHEME)
 
 
 def predict_sequences(model, norm_I_S_test, device, batch=64):
@@ -96,11 +97,13 @@ def fit(model, loaders, coll_loader, physics, ckpt_path, device):
 # ======================= 1. bound: any memoryless model ======================
 def bound_predictions(I_S_data, D_S_data, idx):
     """
-    The best prediction that is a function of the instantaneous input.
+    The lowest-MAE prediction that is a function of the instantaneous input.
 
     Steps are grouped by identical input vectors and each group is predicted by
-    the mean of its own labels, which no function of the input alone can beat.
-    Evaluated in sample on the given partition, so the bound is conservative.
+    the median of its own labels, which minimizes the absolute error within the
+    group, so no function of the input alone can reach a lower MAE over whole
+    groups (the whole horizon, or each coolant segment). Evaluated in sample on
+    the given partition, so the bound is conservative.
     """
     I_S_p, D_S_p = I_S_data[idx], D_S_data[idx]
     flat_x = I_S_p.reshape(-1, I_S_p.shape[-1])
@@ -112,7 +115,7 @@ def bound_predictions(I_S_data, D_S_data, idx):
     pred = np.empty_like(flat_y)
     for g in range(group.max() + 1):
         m = group == g
-        pred[m] = flat_y[m].mean(axis=0)
+        pred[m] = np.median(flat_y[m], axis=0)
 
     return pred.reshape(D_S_p.shape), group.max() + 1
 
@@ -175,52 +178,24 @@ def extract_transitions(I_S_data, D_S_data, idx):
     return inputs, D_S_p.reshape(-1, 2)
 
 
-class OneStepPhysics:
+class OneStepPhysics(Physics):
     """
     Single-transition discrete-time residual, the counterpart of the unrolled
-    residual in `phys_res.py`. The current state is an input here, so the
-    residual relates one input to one output and does not chain predictions.
+    residual in `phys_res.py`, whose kinetics and discretization it reuses. The
+    current state is an input here, so the residual relates one input to one
+    output and does not chain predictions.
     """
 
     def __init__(self, I_metrics, D_metrics, dt=cstr.deltaT, scheme=M.SCHEME):
-        self.I_metrics, self.D_metrics = I_metrics, D_metrics
-        self.dt, self.scheme = dt, scheme
-        self.ot_ranges = [
-            D_metrics[k]["max"] - D_metrics[k]["min"] for k in AR_D_S_keys
-        ]
-
-    def _f(self, CA, T, TC):
-        rate = cstr.k0 * torch.exp(-cstr.E_over_R / T) * CA
-        dCA = (cstr.q / cstr.V) * (cstr.CA_f - CA) - rate
-        dT = (
-            (cstr.q / cstr.V) * (cstr.T_f - T)
-            + ((-cstr.dH) / (cstr.rho * cstr.Cp)) * rate
-            + (cstr.UA / (cstr.V * cstr.rho * cstr.Cp)) * (TC - T)
-        )
-        return dCA, dT
-
-    def _increment(self, CA_k, T_k, CA_k1, T_k1, TC):
-        if self.scheme == "euler":
-            return self._f(CA_k, T_k, TC)
-        if self.scheme == "bwd_euler":
-            return self._f(CA_k1, T_k1, TC)
-        if self.scheme == "trapezoid":
-            a0, b0 = self._f(CA_k, T_k, TC)
-            a1, b1 = self._f(CA_k1, T_k1, TC)
-            return 0.5 * (a0 + a1), 0.5 * (b0 + b1)
-        h = self.dt
-        a1, b1 = self._f(CA_k, T_k, TC)
-        a2, b2 = self._f(CA_k + 0.5 * h * a1, T_k + 0.5 * h * b1, TC)
-        a3, b3 = self._f(CA_k + 0.5 * h * a2, T_k + 0.5 * h * b2, TC)
-        a4, b4 = self._f(CA_k + h * a3, T_k + h * b3, TC)
-        return (a1 + 2 * a2 + 2 * a3 + a4) / 6.0, (b1 + 2 * b2 + 2 * b3 + b4) / 6.0
+        super().__init__(I_metrics, D_metrics, dt=dt, scheme=scheme)
 
     def __call__(self, x, y):
-        CA_k = Denormalization.min_max_col(x[:, 0:1], "CA_k", self.I_metrics)
-        T_k = Denormalization.min_max_col(x[:, 1:2], "T_k", self.I_metrics)
-        TC = Denormalization.min_max_col(x[:, 2:3], "TC_k", self.I_metrics)
-        CA_1 = Denormalization.min_max_col(y[:, 0:1], "CA_k1", self.D_metrics)
-        T_1 = Denormalization.min_max_col(y[:, 1:2], "T_k1", self.D_metrics)
+        I_m, D_m = self.I_S_metrics, self.D_S_metrics
+        CA_k = Denormalization.min_max_col(x[:, 0:1], "CA_k", I_m)
+        T_k = Denormalization.min_max_col(x[:, 1:2], "T_k", I_m)
+        TC = Denormalization.min_max_col(x[:, 2:3], "TC_k", I_m)
+        CA_1 = Denormalization.min_max_col(y[:, 0:1], "CA_k1", D_m)
+        T_1 = Denormalization.min_max_col(y[:, 1:2], "T_k1", D_m)
 
         phi_CA, phi_T = self._increment(CA_k, T_k, CA_1, T_1, TC)
         res = torch.cat(
@@ -336,8 +311,9 @@ def autoregressive_predictions(I_S_data, D_S_data, splits, device):
 def plot_trajectories(t, truth, pred, tc, save_dir, fontsize=19, fontfamily="Arial"):
     """Draw truth against the recurrent prediction for a few test trajectories."""
     n = truth.shape[0]
-    fig, axes = plt.subplots(3, n, figsize=(5.2 * n, 11), dpi=300, sharex=True)
-    axes = np.atleast_2d(axes)
+    fig, axes = plt.subplots(
+        3, n, figsize=(5.2 * n, 11), dpi=300, sharex=True, squeeze=False
+    )
     panels = (
         (0, "Concentration of A (mol/L)", "slateblue"),
         (1, "Reactor Temperature (K)", "indianred"),
@@ -444,7 +420,7 @@ if __name__ == "__main__":
     t = cstr.deltaT * np.arange(1, cstr.SEQ_LEN + 1)
 
     # ---------------- 1. The four models ----------------
-    recurrent, physics = load_recurrent(device)
+    recurrent, physics = load_recurrent(I_S_metrics, D_S_metrics, device)
     preds = {
         "recurrent": denorm_outputs(
             predict_sequences(recurrent, norm_I_S_data[idx_test], device), D_S_metrics
@@ -453,7 +429,7 @@ if __name__ == "__main__":
 
     preds["bound"], n_groups = bound_predictions(I_S_data, D_S_data, idx_test)
     print(
-        f"Lower bound for any function of the instantaneous input: "
+        f"Lower bound on MAE for any function of the instantaneous input: "
         f"{n_groups:,} distinct input vectors over "
         f"{len(idx_test) * cstr.SEQ_LEN:,} predicted states"
     )

@@ -43,19 +43,22 @@ I_S_keys = ["CA_0", "T_0", "TC_k"]  # input features per time step
 D_S_keys = ["CA_k1", "T_k1"]  # output features per time step
 
 
-def derivatives(CA, T, TC):
+def derivatives(CA, T, TC, exp=np.exp):
     """
     Inputs
     ------
-    CA, T, TC : np.ndarray
+    CA, T, TC : np.ndarray or torch.Tensor
         Concentration of A (mol/L), reactor and coolant temperature (K).
+    exp : callable, optional, default=np.exp
+        Exponential matching the array type, e.g. torch.exp for tensors, so the
+        same kinetics serve data generation and the physics residuals.
 
     Returns
     -------
-    dCA_dt, dT_dt : np.ndarray
+    dCA_dt, dT_dt : np.ndarray or torch.Tensor
         Rates of change, in mol/(L min) and K/min.
     """
-    rate = k0 * np.exp(-E_over_R / T) * CA
+    rate = k0 * exp(-E_over_R / T) * CA
     dCA_dt = (q / V) * (CA_f - CA) - rate
     dT_dt = (
         (q / V) * (T_f - T)
@@ -63,3 +66,15 @@ def derivatives(CA, T, TC):
         + (UA / (V * rho * Cp)) * (TC - T)
     )
     return dCA_dt, dT_dt
+
+
+def rk4_increment(CA, T, TC, h, exp=np.exp):
+    """
+    Classical fourth-order Runge-Kutta increment phi over one interval h, with
+    the coolant temperature held constant, such that u_k1 = u_k + h * phi.
+    """
+    a1, b1 = derivatives(CA, T, TC, exp)
+    a2, b2 = derivatives(CA + 0.5 * h * a1, T + 0.5 * h * b1, TC, exp)
+    a3, b3 = derivatives(CA + 0.5 * h * a2, T + 0.5 * h * b2, TC, exp)
+    a4, b4 = derivatives(CA + h * a3, T + h * b3, TC, exp)
+    return (a1 + 2 * a2 + 2 * a3 + a4) / 6.0, (b1 + 2 * b2 + 2 * b3 + b4) / 6.0

@@ -113,8 +113,21 @@ def data_module(
     )
 
 
+def make_model(device):
+    """The recurrent architecture of this example, shared with the evaluation scripts."""
+    return RecurrentANN(
+        in_dim=len(cstr.I_S_keys),
+        hidden_dim=hidden,
+        out_dim=len(cstr.D_S_keys),
+        n_layers=layers,
+        cell=CELL,
+        head_layers=head_layers,
+        activation=nn.Tanh,
+    ).to(device)
+
+
 def build(device):
-    """Assemble the loaders, model and residual shared with the evaluation scripts."""
+    """Assemble the loaders, model and residual used in training."""
     _, _, norm_I_S_data, norm_D_S_data, I_S_metrics, D_S_metrics = prepare()
 
     data = data_module(
@@ -128,16 +141,7 @@ def build(device):
     train_loader, val_loader, test_loader = data.labeled_data_loader()
     phys_coll_loader = data.phys_colloc_loader()
 
-    model = RecurrentANN(
-        in_dim=len(cstr.I_S_keys),
-        hidden_dim=hidden,
-        out_dim=len(cstr.D_S_keys),
-        n_layers=layers,
-        cell=CELL,
-        head_layers=head_layers,
-        activation=nn.Tanh,
-    ).to(device)
-
+    model = make_model(device)
     physics = Physics(I_S_metrics, D_S_metrics, scheme=SCHEME)
 
     return (

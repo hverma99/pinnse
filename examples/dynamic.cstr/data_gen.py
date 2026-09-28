@@ -20,19 +20,10 @@ Outputs
 
 The initial state is carried as a constant context feature because the
 recurrent hidden state starts at zero. Runaway trajectories are screened
-against T_CEILING and the retained fraction reported. See README.md.
+against T_CEILING and the retained fraction reported.
 """
 
 N_TRAJ = 1200  # trajectories requested
-
-
-def rk4_increment(CA, T, TC, h):
-    """Classical RK fourth-order increment."""
-    a1, b1 = cstr.derivatives(CA, T, TC)
-    a2, b2 = cstr.derivatives(CA + 0.5 * h * a1, T + 0.5 * h * b1, TC)
-    a3, b3 = cstr.derivatives(CA + 0.5 * h * a2, T + 0.5 * h * b2, TC)
-    a4, b4 = cstr.derivatives(CA + h * a3, T + h * b3, TC)
-    return (a1 + 2 * a2 + 2 * a3 + a4) / 6.0, (b1 + 2 * b2 + 2 * b3 + b4) / 6.0
 
 
 def sample_designs(n_traj: int, seed: int):
@@ -153,7 +144,7 @@ def main():
     u_curr = np.concatenate([I_S_data[:, :1, 0:2], D_S_data[:, :-1, :]], axis=1)
     TC = I_S_data[:, :, 2]
     _, dT = cstr.derivatives(u_curr[:, :, 0], u_curr[:, :, 1], TC)
-    _, phi = rk4_increment(u_curr[:, :, 0], u_curr[:, :, 1], TC, cstr.deltaT)
+    _, phi = cstr.rk4_increment(u_curr[:, :, 0], u_curr[:, :, 1], TC, cstr.deltaT)
     err_eu = np.abs(D_S_data[:, :, 1] - (u_curr[:, :, 1] + cstr.deltaT * dT))
     err_rk = np.abs(D_S_data[:, :, 1] - (u_curr[:, :, 1] + cstr.deltaT * phi))
 

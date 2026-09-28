@@ -22,6 +22,7 @@ while the collocation datasets are unaffected, since they carry no measured valu
 NOISE_LEVEL = 0.05  # Noise magnitude; interpretation depends on NOISE_MODE
 NOISE_MODE = "relative"  # "relative" | "proportional" | "absolute"
 NOISE_SEED = 42  # Seed of the noise realization
+TEST_FRAC, VAL_FRAC, SPLIT_SEED = 0.1, 0.1, 42  # Partition, shared with check.py
 
 
 def main():
@@ -84,8 +85,9 @@ def main():
         physics_coll_batch_size=B_C_P,
         boundary_coll_data_size=N_C_B,
         boundry_coll_batch_size=B_C_B,
-        test_frac=0.1,
-        val_frac=0.1,
+        test_frac=TEST_FRAC,
+        val_frac=VAL_FRAC,
+        random_state=SPLIT_SEED,
     )
 
     train_loader, val_loader, test_loader = data.labeled_data_loader()
