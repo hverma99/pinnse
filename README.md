@@ -635,28 +635,6 @@ class Boundary:
 
 ---
 
-## Changelog
-
-### 0.1.0
-
-**Breaking change**
-
-- `BranchedANN` is renamed `MultiHeadANN`. The constructor arguments are unchanged, so replacing the name is the only change needed:
-  ```python
-  from pinnse import MultiHeadANN   # was: from pinnse import BranchedANN
-  ```
-
-**Added**
-
-- `RecurrentANN`: recurrent (RNN, GRU or LSTM) sequence-to-sequence architecture for dynamic processes.
-- `SequenceDataModule`: data loaders for trajectory data, with splits by whole trajectory and piecewise-constant collocation trajectories.
-- `Training(grad_aggregator=...)` for strategies that combine the per-loss gradients directly, with `PCGrad` as a ready-to-use implementation.
-- `Training(weight_scheme=...)` for user-supplied adaptive-weighting rules.
-- `Noise.gaussian` for perturbing labelled data with relative, proportional or absolute measurement noise.
-- Examples: `examples/dynamic.cstr` (recurrent PINN for a nonisothermal CSTR) and `examples/isopfr/efm.noise` (PINN vs. data-driven training on noisy data).
-
----
-
 ## Citation
 
 If you use `pinnse`, please cite the associated paper:
