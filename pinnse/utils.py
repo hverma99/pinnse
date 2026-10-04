@@ -1,6 +1,6 @@
 import pandas as pd, numpy as np, os
 import torch.nn as nn, torch
-from pinnse import ANN
+from .PINNs import ANN
 
 
 class Normalization:

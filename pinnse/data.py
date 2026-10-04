@@ -32,6 +32,10 @@ class DataModule:
         self.val_frac = val_frac
         self.random_state = random_state
 
+        X_full = self.I_S_data.to_numpy(dtype=np.float32)
+        self.lower_bnd = X_full.min(axis=0)
+        self.upper_bnd = X_full.max(axis=0)
+
     def labeled_data_loader(self):
         """
         Construct labeled DataLoaders for training, validation, and test datasets.
@@ -54,9 +58,6 @@ class DataModule:
         """
         X = self.I_S_data.to_numpy(dtype=np.float32)
         Y = self.D_S_data.to_numpy(dtype=np.float32)
-
-        self.lower_bnd = X.min(axis=0)
-        self.upper_bnd = X.max(axis=0)
 
         X_tv, X_test, Y_tv, Y_test = train_test_split(
             X, Y, test_size=self.test_frac, random_state=self.random_state
@@ -253,7 +254,7 @@ class DataModule:
         Notes
         -----
         - For labeled loaders, prints the shapes of both input and output tensors.
-        - For unlabeled (collocattion) loaders, prints only the shape of the input tensor.
+        - For unlabeled (collocation) loaders, prints only the shape of the input tensor.
         """
         batch = next(iter(loader))
         if isinstance(batch, (list, tuple)) and len(batch) == 2:
