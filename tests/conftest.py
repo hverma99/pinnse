@@ -3,11 +3,13 @@ import random
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
+# On Windows/Anaconda, torch must load before NumPy (imported by matplotlib),
+# or importing torch fails with "Error loading ...\torch\lib\shm.dll".
+import torch
+
 import matplotlib
 
 matplotlib.use("Agg")
-
-import torch
 
 import matplotlib.pyplot as plt
 import numpy as np
