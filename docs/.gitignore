@@ -1,0 +1,5 @@
+# The root .gitignore excludes *.md; the documentation pages are Markdown (MyST).
+!*.md
+# Private release notes, kept out of git.
+task.md
+_build/
