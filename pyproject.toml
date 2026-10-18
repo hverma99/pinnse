@@ -63,7 +63,9 @@ aspen = [
 dev = [
     "build",
     "twine",
-    "pytest"
+    "pytest",
+    "pytest-cov",
+    "prek"
 ]
 
 [project.urls]
@@ -73,3 +75,35 @@ Repository = "https://github.com/hverma99/pinnse"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pinnse*"]
+
+[tool.ruff.lint]
+# Explicit rule set, so results do not change when Ruff changes its defaults.
+# E4/E7/E9/F: pyflakes and pycodestyle errors; I: import sorting; B: bugbear.
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B905"]  # zip() without strict=
+
+[tool.ruff.lint.per-file-ignores]
+# Example scripts define process constants and loop variables for readability.
+"examples/**" = ["F841", "B007"]
+
+[tool.ruff.lint.isort]
+# Sibling modules imported by the example scripts.
+known-local-folder = ["cstr_model", "data_gen", "pfr_model", "phys_res"]
+# On Windows/Anaconda, torch must load before NumPy/SciPy (MKL), or importing
+# torch fails with "Error loading ...\torch\lib\shm.dll". Keep it first.
+section-order = ["future", "standard-library", "torch", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.lint.isort.sections]
+torch = ["torch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=pinnse --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["pinnse"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

@@ -7,3 +7,6 @@ build/
 *.docx
 *.md
 *.pdf
+.venv/
+.coverage
+.pytest_cache/
