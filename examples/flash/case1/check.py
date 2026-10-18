@@ -2,15 +2,17 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MultipleLocator
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 
-from pinnse import Normalization, Analyze
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MultipleLocator
+
+from pinnse import Analyze, Normalization
+
 from data_gen import D_S_samples
 
 

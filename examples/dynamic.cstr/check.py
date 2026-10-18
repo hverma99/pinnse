@@ -1,12 +1,17 @@
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import torch, torch.nn as nn, numpy as np, pandas as pd
+import torch
+import torch.nn as nn
+
+import main as M
 import matplotlib.pyplot as plt
-from pinnse import ANN, Training, Normalization, Denormalization, Analyze
+import numpy as np
+import pandas as pd
+
+from pinnse import ANN, Analyze, Denormalization, Normalization, Training
 
 import cstr_model as cstr
-import main as M
 from phys_res import Physics
 
 """

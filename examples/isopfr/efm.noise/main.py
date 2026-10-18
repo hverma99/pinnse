@@ -1,14 +1,15 @@
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import torch, torch.nn as nn, numpy as np, pandas as pd
-from pinnse import Normalization, Noise, Save
-from pinnse import DataModule
-from pinnse import ANN
-from pinnse import Training
-from pinnse import Plotter
-from data_gen import species
-from phys_res import Physics, Boundary
+import torch
+import torch.nn as nn
+
+import numpy as np
+import pandas as pd
+
+from pinnse import ANN, DataModule, Noise, Normalization, Plotter, Save, Training
+
+from phys_res import Boundary, Physics
 
 """
 Effluent-flow-based (EFM) PINN model for the isothermal PFR process, trained

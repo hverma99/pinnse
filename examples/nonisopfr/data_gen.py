@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import qmc
-from pfr_model import NonisoPFR, Reaction
 from tqdm import tqdm
+
+from pfr_model import NonisoPFR, Reaction
 
 species = ["A", "B", "C"]
 N_species = len(species)
@@ -110,7 +111,6 @@ def D_S_samples(I_S_samples: pd.DataFrame):
         total=len(I_S_samples),
         desc="Simulating trajectories",
     ):
-
         F0_vals = {"A": sample["F0_A"], "B": 0.0, "C": 0.0}
         C0_vals = {"A": sample["C0_A"], "B": 0.0, "C": 0.0}
 
@@ -173,7 +173,6 @@ def D_S_samples(I_S_samples: pd.DataFrame):
 
 
 if __name__ == "__main__":
-
     I_S_inlet = I_S_samples()
 
     I_S, D_S = D_S_samples(I_S_inlet)

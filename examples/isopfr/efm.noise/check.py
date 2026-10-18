@@ -4,17 +4,19 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import torch
 import torch.nn as nn
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+from main import NOISE_LEVEL, NOISE_MODE, NOISE_SEED
 from matplotlib.lines import Line2D
 from sklearn.model_selection import train_test_split
 
-from data_gen import species, nu, key_species, k, E
+from pinnse import Analyze, Noise, Normalization
+
+from data_gen import E, k, key_species, nu, species
 from pfr_model import EFM
 from phys_res import Physics
-from pinnse import Normalization, Analyze, Noise
-from main import NOISE_LEVEL, NOISE_MODE, NOISE_SEED
 
 """
 Evaluation for the noisy-data EFM study.
@@ -134,8 +136,8 @@ def plot_profile(
     )
     ax.legend(
         handles=[
-            Line2D([0], [0], color=c, ls="-", lw=1.5, label=l)
-            for c, l in zip(colors, labels)
+            Line2D([0], [0], color=c, ls="-", lw=1.5, label=lbl)
+            for c, lbl in zip(colors, labels)
         ],
         loc="upper left",
         frameon=False,
@@ -285,7 +287,7 @@ if __name__ == "__main__":
     )
     plot_profile(V_eval, D_S_truth, D_S_pinn, save_dir)
 
-    print(f"\nReactor profile, against the first-principle solution:")
+    print("\nReactor profile, against the first-principle solution:")
     print(prof_metrics_df.to_string(index=False))
     print(f"  mean physics residual : {res_l2_prof.mean():.4e}")
 

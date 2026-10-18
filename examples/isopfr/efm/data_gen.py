@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-from pfr_model import EFM
 from scipy.stats import qmc
 from tqdm import tqdm
+
+from pfr_model import EFM
 
 """
 Generate labeled input-output (I_S/D_S) datasets for the isothermal PFR process (EFM).

@@ -1,11 +1,12 @@
-import torch, os, random, matplotlib.pyplot as plt, numpy as np
+import random
+from itertools import cycle
+from typing import Callable, Optional, Union
+
+import torch
 from torch import nn
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+
 from tqdm import tqdm
-from typing import Optional, Callable, Union
-from itertools import cycle
-import matplotlib.pyplot as plt
-import pandas as pd
 
 """
 Training module for supervised and PINN models.
@@ -335,7 +336,9 @@ class Training(object):
         tot_phys_loss, n_phys = 0.0, 0
         n_phys_coll_total = len(self.all_phys_colloc_batches)
         phys_frac = max(0.0, min(1.0, float(phys_colloc_frac)))
-        n_sample = min(n_phys_coll_total, int(round(n_phys_coll_total * phys_frac)))
+        n_sample = max(
+            1, min(n_phys_coll_total, int(round(n_phys_coll_total * phys_frac)))
+        )
         if (
             self.phys_weight != 0
             and self.phys_residual is not None
@@ -394,7 +397,6 @@ class Training(object):
         pbar = tqdm(range(1, epochs + 1), desc="Training", unit="epoch")
 
         for epoch in pbar:
-
             loss_stats = self.train_epoch()
             loss_t.append(loss_stats["total_loss"])
             loss_d.append(loss_stats["data_loss"])
@@ -440,15 +442,12 @@ class Training(object):
                     # same exponential moving average as the default rule.
                     target_wp, target_wb = self.weight_scheme(grad_d, grad_p, grad_b)
 
-                    if self.phys_weight:
-                        self.phys_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.phys_weight + self.wt_ema * target_wp
-
-                    if self.bnd_weight:
-                        self.bnd_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.bnd_weight + self.wt_ema * target_wb
+                    self.phys_weight = (
+                        1.0 - self.wt_ema
+                    ) * self.phys_weight + self.wt_ema * target_wp
+                    self.bnd_weight = (
+                        1.0 - self.wt_ema
+                    ) * self.bnd_weight + self.wt_ema * target_wb
 
                 else:
                     if self.phys_weight and grad_p > 0.0:
@@ -467,7 +466,6 @@ class Training(object):
             wt_bnd.append(self.bnd_weight)
 
             if epoch % val_every == 0:
-
                 val_data, val_phys, val_bnd = self.validate_test(loader=self.val_loader)
                 val_total = (
                     val_data + self.phys_weight * val_phys + self.bnd_weight * val_bnd

@@ -2,17 +2,19 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
 
-from data_gen import species, nu, key_species, k, E
+from pinnse import Analyze, Normalization
+
+from data_gen import E, k, key_species, nu, species
 from pfr_model import EFM
 from phys_res import Physics
-from pinnse import Normalization, Analyze
 
 
 def build_profile_inputs(
@@ -408,7 +410,10 @@ if __name__ == "__main__":
     save_dir = "compare"
     os.makedirs(save_dir, exist_ok=True)
 
-    physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
+    # Residual against the true kinetics; Physics takes theta = E in kJ/mol as a tensor
+    physics = Physics(
+        I_S_metrics, D_S_metrics, species, nu, key_species, k, torch.tensor(E / 1e3)
+    )
 
     # ------------------ Case-specific process specifications ---------------------
     F_in = np.array([1000.0, 40.0, 25.0, 80.0, 20.0], dtype=np.float32)

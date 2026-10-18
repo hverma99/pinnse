@@ -1,5 +1,7 @@
 import torch
+
 import numpy as np
+
 from pinnse import Denormalization
 
 
@@ -82,9 +84,7 @@ class Physics:
                 create_graph=True,
                 retain_graph=True,
                 allow_unused=False,
-            )[0][
-                :, -1:
-            ]  # derivative wrt V
+            )[0][:, -1:]  # derivative wrt V
             dF_dV[:, i : i + 1] = grad_F_i
 
         # Denormalize F_ot, P, T, and obtain ranges

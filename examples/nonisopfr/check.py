@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Iterable
 
@@ -8,14 +7,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 
-from pfr_model import NonisoPFR, Reaction
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 from pinnse import SANN
+
+from pfr_model import NonisoPFR, Reaction
 from phys_res import Physics
 
 # -----------------------------------------------------------------------------

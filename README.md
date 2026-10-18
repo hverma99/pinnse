@@ -203,8 +203,8 @@ This walkthrough uses the **isothermal PFR — effluent flowrate model (EFM)** e
 import pandas as pd
 from pinnse import Normalization
 
-I_S_data = pd.read_excel("I_S_data.xlsx")   # Inputs:  inlet flowrates, P, T, V
-D_S_data = pd.read_excel("D_S_data.xlsx")   # Outputs: outlet flowrates
+I_S_data = pd.read_excel("I_S_data.xlsx")  # Inputs:  inlet flowrates, P, T, V
+D_S_data = pd.read_excel("D_S_data.xlsx")  # Outputs: outlet flowrates
 
 # Normalize to [-1, 1] with formulation-aware scaling
 norm_I_S, norm_D_S, I_S_metrics, D_S_metrics = Normalization.min_max_pfr(
@@ -224,7 +224,7 @@ data = DataModule(
     I_S_data=norm_I_S,
     D_S_data=norm_D_S,
     labeled_data_batch_size=500,
-    physics_coll_data_size=20000,     # Number of collocation points
+    physics_coll_data_size=20000,  # Number of collocation points
     physics_coll_batch_size=500,
     boundary_coll_data_size=5000,
     boundry_coll_batch_size=1000,
@@ -233,8 +233,8 @@ data = DataModule(
 )
 
 train_loader, val_loader, test_loader = data.labeled_data_loader()
-phys_coll_loader = data.phys_colloc_loader()    # LHS + Dirichlet sampling
-bnd_coll_loader  = data.bnd_colloc_loader()     # Boundary-fixed sampling
+phys_coll_loader = data.phys_colloc_loader()  # LHS + Dirichlet sampling
+bnd_coll_loader = data.bnd_colloc_loader()  # Boundary-fixed sampling
 ```
 
 ### Step 3: Define physics and boundary residuals
@@ -244,7 +244,7 @@ These are defined in a separate `phys_res.py` file (process-specific). The resid
 ```python
 from phys_res import Physics, Boundary
 
-physics  = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
+physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
 boundary = Boundary(species)
 ```
 
@@ -254,10 +254,10 @@ boundary = Boundary(species)
 import torch, torch.nn as nn
 from pinnse import ANN
 
-dim_in = I_S_data.shape[1]   # Number of input features
-dim_ot = D_S_data.shape[1]   # Number of output targets
+dim_in = I_S_data.shape[1]  # Number of input features
+dim_ot = D_S_data.shape[1]  # Number of output targets
 
-layer_size = [dim_in] + [64] * 6 + [dim_ot]   # 6 hidden layers, 64 neurons
+layer_size = [dim_in] + [64] * 6 + [dim_ot]  # 6 hidden layers, 64 neurons
 model = ANN(layer_size, activation=nn.Tanh).to(device)
 ```
 
@@ -279,9 +279,9 @@ training = Training(
     phys_residual=physics,
     bnd_residual=boundary,
     ckpt_path="./logs/best_model.pth",
-    phys_weight=1.0,      # Weight for physics loss
-    bnd_weight=1.0,       # Weight for boundary loss
-    adapt_wts=False,       # Set True for adaptive gradient-norm balancing
+    phys_weight=1.0,  # Weight for physics loss
+    bnd_weight=1.0,  # Weight for boundary loss
+    adapt_wts=False,  # Set True for adaptive gradient-norm balancing
 )
 
 history = training.adam_step(epochs=75000, val_every=100)
@@ -313,13 +313,21 @@ All public classes are importable directly from `pinnse`:
 
 ```python
 from pinnse import (
-    ANN, SANN, MultiHeadANN, Fourier_ANN,   # Feedforward architectures
-    RecurrentANN,                            # Sequence architecture
-    DataModule, SequenceDataModule,          # Data loading
-    Training, PCGrad,                        # Training loop, gradient aggregation
-    Plotter,                                 # Visualization
-    Normalization, Denormalization,          # Scaling
-    Save, Analyze, Noise,                    # Utilities
+    ANN,
+    SANN,
+    MultiHeadANN,
+    Fourier_ANN,  # Feedforward architectures
+    RecurrentANN,  # Sequence architecture
+    DataModule,
+    SequenceDataModule,  # Data loading
+    Training,
+    PCGrad,  # Training loop, gradient aggregation
+    Plotter,  # Visualization
+    Normalization,
+    Denormalization,  # Scaling
+    Save,
+    Analyze,
+    Noise,  # Utilities
 )
 ```
 
@@ -367,10 +375,10 @@ from pinnse import RecurrentANN, SequenceDataModule
 data = SequenceDataModule(
     I_S_data=norm_I_S,
     D_S_data=norm_D_S,
-    labeled_data_batch_size=64,     # trajectories per batch
-    physics_coll_data_size=1000,    # collocation trajectories
+    labeled_data_batch_size=64,  # trajectories per batch
+    physics_coll_data_size=1000,  # collocation trajectories
     physics_coll_batch_size=64,
-    n_segments=4,                   # piecewise-constant coolant schedule
+    n_segments=4,  # piecewise-constant coolant schedule
     test_frac=0.1,
     val_frac=0.1,
 )
@@ -414,7 +422,10 @@ def capped_ratio(grad_d, grad_p, grad_b):
     w_bnd = min(grad_d / (grad_b + 1e-12), 100.0)
     return w_phys, w_bnd
 
-training = Training(..., phys_weight=1.0, bnd_weight=1.0, adapt_wts=True, weight_scheme=capped_ratio)
+
+training = Training(
+    ..., phys_weight=1.0, bnd_weight=1.0, adapt_wts=True, weight_scheme=capped_ratio
+)
 ```
 
 Adaptive weighting, built-in or custom, runs only when both `phys_weight` and `bnd_weight` are nonzero. With a single residual loss (for example `bnd_weight=0.0`), the weights stay fixed. Guard divisions against zero gradient norms, as above.
@@ -453,10 +464,10 @@ Any other multi-objective strategy can be supplied as `grad_aggregator` without 
 from pinnse import Noise
 
 D_S_noisy, noise_metrics = Noise.gaussian(
-    data=D_S_data,          # labelled outputs (DataFrame)
-    noise_level=0.05,       # a float, or a dict {column: level}
+    data=D_S_data,  # labelled outputs (DataFrame)
+    noise_level=0.05,  # a float, or a dict {column: level}
     mode="relative",
-    clip_min=0.0,           # keep flowrates non-negative
+    clip_min=0.0,  # keep flowrates non-negative
     random_state=42,
 )
 ```
@@ -586,6 +597,7 @@ Below is a skeleton for a physics residual class. Replace the residual computati
 import torch
 from pinnse import Denormalization
 
+
 class Physics:
     def __init__(self, I_S_metrics, D_S_metrics):
         self.I_S_metrics = I_S_metrics
@@ -650,8 +662,11 @@ Contributions are welcome. To get started:
 
 1. Fork the repository and create a feature branch.
 2. Install in development mode: `pip install -e ".[dev]"`
-3. Make your changes and add tests where applicable.
-4. Open a pull request with a clear description of the change.
+3. Install the Git hooks: `prek install`
+4. Make your changes and add tests where applicable.
+5. Open a pull request with a clear description of the change.
+
+The hooks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml) run [Ruff](https://docs.astral.sh/ruff/) (lint and format) and basic file checks on the files you stage, every time you commit. If a hook fixes a file, re-stage it (`git add`) and commit again. To check the whole repository, run `prek run --all-files`; CI runs the same command on every pull request. [prek](https://prek.j178.dev/) is a faster drop-in replacement for [pre-commit](https://pre-commit.com/), and `pre-commit install` works with the same configuration.
 
 Please open an issue first for large changes or new features to discuss the approach.
 

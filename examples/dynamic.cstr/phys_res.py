@@ -1,6 +1,8 @@
 import torch
-import cstr_model as cstr
+
 from pinnse import Denormalization
+
+import cstr_model as cstr
 
 SCHEMES = ("euler", "rk4", "bwd_euler", "trapezoid")
 

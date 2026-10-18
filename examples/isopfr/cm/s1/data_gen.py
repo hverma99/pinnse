@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-from pfr_model import CM
 from scipy.stats import qmc
 from tqdm import tqdm
+
+from pfr_model import CM
 
 """
 Generate labeled input-output (I_S/D_S) datasets for the isothermal PFR process (CM).
@@ -148,7 +149,7 @@ def D_S_samples(I_S: pd.DataFrame):
         sol = model.solve(V)
         Conv = sol.y[:, -1]
         Y[i, :] = Conv.astype(np.float32, copy=False)
-    D_S = pd.DataFrame(Y, columns=[f"X_R{j+1}" for j in range(nu.shape[0])])
+    D_S = pd.DataFrame(Y, columns=[f"X_R{j + 1}" for j in range(nu.shape[0])])
     return D_S
 
 
@@ -160,7 +161,7 @@ if __name__ == "__main__":
     D_S = D_S_samples(I_S)
 
     I_S_data = I_S[[*(f"F_in_{sp}" for sp in species), "P", "T", "V"]]
-    D_S_data = D_S[[*(f"X_R{j+1}" for j in range(nu.shape[0]))]]
+    D_S_data = D_S[[*(f"X_R{j + 1}" for j in range(nu.shape[0]))]]
 
     I_S_data.to_excel("I_S_data.xlsx", index=False)
     D_S_data.to_excel("D_S_data.xlsx", index=False)

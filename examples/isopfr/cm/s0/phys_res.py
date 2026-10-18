@@ -1,5 +1,7 @@
 import torch
+
 import numpy as np
+
 from pinnse import Denormalization
 
 
@@ -80,9 +82,7 @@ class Physics:
                 create_graph=True,
                 retain_graph=True,
                 allow_unused=False,
-            )[0][
-                :, -1:
-            ]  # derivative wrt V
+            )[0][:, -1:]  # derivative wrt V
             dX_dV[:, j : j + 1] = grad_X_j
 
         # Denormalize F_in, P, T, and obtain ranges
@@ -111,7 +111,7 @@ class Physics:
         )  # (batch, 1), (1,)
 
         X_R_dim, X_R_rng = Denormalization.min_max_pfr(
-            X_R, self.D_S_metrics, keys=[f"X_R{j+1}" for j in range(self.N_rxn)]
+            X_R, self.D_S_metrics, keys=[f"X_R{j + 1}" for j in range(self.N_rxn)]
         )  # (batch, nr), (nr,)
 
         # Chain rule: dX_dim/dV_dim = (X_rng / V_rng) * dX/dV
@@ -169,7 +169,7 @@ class Boundary:
             X_j = 0 at the inlet boundary.
         """
         X_dim, X_rng = Denormalization.min_max_pfr(
-            y, self.D_S_metrics, keys=[f"X_R{j+1}" for j in range(self.N_rxn)]
+            y, self.D_S_metrics, keys=[f"X_R{j + 1}" for j in range(self.N_rxn)]
         )
 
         # Dimensional BC: X_R = 0 at V = 0

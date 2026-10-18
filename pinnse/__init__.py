@@ -1,8 +1,8 @@
-from .PINNs import ANN, SANN, MultiHeadANN, Fourier_ANN, RecurrentANN
-from .data import DataModule, SequenceDataModule, DataLoader
-from .train import Training, PCGrad
+from .data import DataLoader, DataModule, SequenceDataModule
+from .PINNs import ANN, SANN, Fourier_ANN, MultiHeadANN, RecurrentANN
 from .plots import Plotter
-from .utils import Normalization, Denormalization, Save, Analyze, Noise
+from .train import PCGrad, Training
+from .utils import Analyze, Denormalization, Noise, Normalization, Save
 
 __all__ = [
     "ANN",

@@ -1,5 +1,11 @@
-import pandas as pd, numpy as np, os
-import torch.nn as nn, torch
+import os
+
+import torch
+import torch.nn as nn
+
+import numpy as np
+import pandas as pd
+
 from pinnse import ANN
 
 
@@ -72,10 +78,9 @@ class Normalization:
             vals = data[cols].values.astype(np.float32)
             gmin, gmax = vals.min(), vals.max()
 
-        if gmin is not None and gmax is not None:
-            for col in cols:
-                data_norm[col] = Normalization.scale_centered(data, col, gmin, gmax)
-                norm_metrics[col] = {"min": float(gmin), "max": float(gmax)}
+        for col in cols:
+            data_norm[col] = Normalization.scale_centered(data, col, gmin, gmax)
+            norm_metrics[col] = {"min": float(gmin), "max": float(gmax)}
 
     @staticmethod
     def apply_local(
@@ -167,9 +172,9 @@ class Normalization:
                 f"F_in_{sp}" for sp in species if f"F_in_{sp}" in I_S_data.columns
             ]
             E_cols = [
-                f"E_R{j+1}"
+                f"E_R{j + 1}"
                 for j in range(N_reaction)
-                if f"E_R{j+1}" in D_S_data.columns
+                if f"E_R{j + 1}" in D_S_data.columns
             ]
 
             Normalization.apply_global(
@@ -185,9 +190,9 @@ class Normalization:
                 f"F_in_{sp}" for sp in species if f"F_in_{sp}" in I_S_data.columns
             ]
             X_cols = [
-                f"X_R{j+1}"
+                f"X_R{j + 1}"
                 for j in range(N_reaction)
-                if f"X_R{j+1}" in D_S_data.columns
+                if f"X_R{j + 1}" in D_S_data.columns
             ]
 
             Normalization.apply_local(
@@ -689,7 +694,7 @@ class Save:
                     df = pd.DataFrame({key: value})
                 elif arr.ndim == 2:
                     df = pd.DataFrame(
-                        arr, columns=[f"{key}_{j+1}" for j in range(arr.shape[1])]
+                        arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
                     )
                 else:
                     df = pd.DataFrame({key: pd.Series(value, dtype=object)})
@@ -728,7 +733,7 @@ class Save:
                 df = pd.DataFrame({key: value})
             elif arr.ndim == 2:
                 df = pd.DataFrame(
-                    arr, columns=[f"{key}_{j+1}" for j in range(arr.shape[1])]
+                    arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
                 )
             else:
                 df = pd.DataFrame({key: pd.Series(value, dtype=object)})

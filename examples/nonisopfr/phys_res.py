@@ -1,4 +1,5 @@
 import torch
+
 from pfr_model import Reaction
 
 
@@ -79,7 +80,6 @@ class Physics:
         heat_gen = torch.zeros((batch, 1), dtype=C.dtype, device=C.device)
 
         for rxn_idx, rxn in enumerate(self.reactions):
-
             exponent = (rxn.E / (rxn.R * self.T_ch)) * (1.0 / rxn.T_R - 1.0 / T_safe)
 
             exponent = torch.clamp(exponent, min=-60.0, max=60.0)

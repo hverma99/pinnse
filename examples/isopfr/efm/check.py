@@ -2,17 +2,19 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
 
-from data_gen import species, nu, key_species, k, E
+from pinnse import Analyze, Normalization
+
+from data_gen import E, k, key_species, nu, species
 from pfr_model import EFM
 from phys_res import Physics
-from pinnse import Normalization, Analyze
 
 
 def build_profile_inputs(

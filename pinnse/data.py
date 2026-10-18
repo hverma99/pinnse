@@ -1,10 +1,28 @@
-import pandas as pd
-import numpy as np
-import torch
 from typing import Optional
-from torch.utils.data import TensorDataset, DataLoader
-from sklearn.model_selection import train_test_split
+
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+import numpy as np
+import pandas as pd
 from scipy.stats import qmc
+from sklearn.model_selection import train_test_split
+
+
+def _require_size(value: Optional[int], name: str) -> int:
+    """
+    Return a collocation size, rejecting a missing or non-positive value.
+
+    The collocation sizes are optional at construction, since a purely
+    data-driven model never builds a collocation loader, but building one
+    without them would yield an empty or unbatched loader.
+    """
+    if value is None or value <= 0:
+        raise ValueError(
+            f"{name} must be a positive integer to build this collocation "
+            f"loader; received {value!r}."
+        )
+    return value
 
 
 class DataModule:
@@ -122,12 +140,9 @@ class DataModule:
         Dirichlet distributions so that each group sums to 1.
         - All other input variables are sampled using Latin Hypercube Sampling
         """
+        N_colloc = _require_size(self.physics_coll_data_size, "physics_coll_data_size")
+        _require_size(self.physics_coll_batch_size, "physics_coll_batch_size")
         rng = np.random.default_rng(self.random_state)
-        N_colloc = (
-            self.physics_coll_data_size
-            if self.physics_coll_data_size is not None
-            else 0
-        )
 
         in_cols = list(self.I_S_data.columns)
         simplex_prefixes = ("Z_", "X_", "Y_")
@@ -153,7 +168,7 @@ class DataModule:
                 parts[col] = X_box[:, j : j + 1]
 
         # Dirichlet sampling for molar fraction variables
-        for prefix, cols in dirichlet_groups.items():
+        for cols in dirichlet_groups.values():
             if cols:
                 X_dir = rng.dirichlet(
                     alpha=np.full(len(cols), alpha, dtype=np.float32), size=N_colloc
@@ -204,14 +219,10 @@ class DataModule:
         - All other input variables are sampled using Latin Hypercube Sampling
           over their admissible bounds.
         """
+        N_bc = _require_size(self.boundry_coll_data_size, "boundary_coll_data_size")
+        _require_size(self.boundry_coll_batch_size, "boundry_coll_batch_size")
         rng = np.random.default_rng(self.random_state)
         dim_in = self.I_S_data.shape[1]
-
-        N_bc = (
-            self.boundry_coll_data_size
-            if self.boundry_coll_data_size is not None
-            else 0
-        )
 
         low = self.lower_bnd[:-1].astype(np.float32)
         up = self.upper_bnd[:-1].astype(np.float32)
@@ -405,8 +416,9 @@ class SequenceDataModule:
 
         self.n_traj, self.seq_len, self.dim_in = I_S_data.shape
 
-        self.lower_bnd, self.upper_bnd = I_S_data.min(axis=(0, 1)), I_S_data.max(
-            axis=(0, 1)
+        self.lower_bnd, self.upper_bnd = (
+            I_S_data.min(axis=(0, 1)),
+            I_S_data.max(axis=(0, 1)),
         )
 
         # initial & boundary conditions are held constant when sampling collocation
@@ -491,12 +503,9 @@ class SequenceDataModule:
           expanded into a piecewise-constant schedule.
         - All features are sampled using Latin Hypercube Sampling
         """
+        N_colloc = _require_size(self.physics_coll_data_size, "physics_coll_data_size")
+        _require_size(self.physics_coll_batch_size, "physics_coll_batch_size")
         rng = np.random.default_rng(self.random_state)
-        N_colloc = (
-            self.physics_coll_data_size
-            if self.physics_coll_data_size is not None
-            else 0
-        )
 
         n_ctx = len(self.context_cols)
         sampler = qmc.LatinHypercube(

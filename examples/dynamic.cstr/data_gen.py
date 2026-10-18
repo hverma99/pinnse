@@ -72,7 +72,7 @@ def integrate_trajectory(CA_0: float, T_0: float, tc_seq: np.ndarray):
         TC = tc_seq[step]
         t_eval = cstr.deltaT * np.arange(1, n + 1)
         sol = solve_ivp(
-            lambda t, y: list(cstr.derivatives(y[0], y[1], TC)),
+            lambda t, y: list(cstr.derivatives(y[0], y[1], TC)),  # noqa: B023 (called within this iteration)
             t_span=(0.0, t_eval[-1]),
             y0=[CA, T],
             method="Radau",
@@ -160,7 +160,7 @@ def main():
     print(f"\nOne-step truncation error in T over {err_eu.size:,} transitions:")
     print(f"  forward Euler : mean {err_eu.mean():.3e}  max {err_eu.max():.3e} K")
     print(f"  RK4           : mean {err_rk.mean():.3e}  max {err_rk.max():.3e} K")
-    print(f"\nSaved I_S_data.xlsx and D_S_data.xlsx " f"({len(I_S_flat):,} rows each)")
+    print(f"\nSaved I_S_data.xlsx and D_S_data.xlsx ({len(I_S_flat):,} rows each)")
 
 
 if __name__ == "__main__":

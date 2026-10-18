@@ -2,17 +2,19 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
 
-from data_gen import species, nu, key_species, k, E
+from pinnse import Analyze, Normalization
+
+from data_gen import E, k, key_species, nu, species
 from pfr_model import ERM
 from phys_res import Physics
-from pinnse import Normalization, Analyze
 
 
 def build_profile_inputs(
@@ -59,7 +61,7 @@ def truth_eval(
     sol = model.solve(V_end=float(V_eval[-1]), V_eval=V_eval)
     E_truth = sol.y.T.astype(np.float32)
 
-    return pd.DataFrame(E_truth, columns=[f"E_R{j+1}" for j in range(nu.shape[0])])
+    return pd.DataFrame(E_truth, columns=[f"E_R{j + 1}" for j in range(nu.shape[0])])
 
 
 def plot_extent_profile(
@@ -348,7 +350,7 @@ def save_results(
 
     res_sheet = pd.DataFrame({"V": V_eval})
     for j in range(res_abs.shape[1]):
-        res_sheet[f"Residual_R{j+1}"] = res_abs[:, j]
+        res_sheet[f"Residual_R{j + 1}"] = res_abs[:, j]
 
     res_overall_sheet = pd.DataFrame({"V": V_eval, "Residual_Overall": res_l2})
 

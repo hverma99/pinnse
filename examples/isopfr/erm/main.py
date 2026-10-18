@@ -1,13 +1,15 @@
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import torch, torch.nn as nn, numpy as np, pandas as pd
-from pinnse import Normalization, Save
-from pinnse import DataModule
-from pinnse import ANN
-from pinnse import Training
-from phys_res import Physics, Boundary
-from pinnse import Plotter
+import torch
+import torch.nn as nn
+
+import numpy as np
+import pandas as pd
+
+from pinnse import ANN, DataModule, Normalization, Plotter, Save, Training
+
+from phys_res import Boundary, Physics
 
 
 def main():

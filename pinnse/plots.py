@@ -1,8 +1,9 @@
 import os
-import numpy as np
-import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import numpy as np
+import pandas as pd
 
 
 class Plotter:
@@ -66,7 +67,7 @@ class Plotter:
     def _format_axis(self, ax, xlabel="Epoch", ylabel=None, scale=None):
         if scale is not None:
             ax.xaxis.set_major_formatter(
-                mticker.FuncFormatter(lambda x, pos: f"{x/scale:.0f}")
+                mticker.FuncFormatter(lambda x, pos: f"{x / scale:.0f}")
             )
         ax.set_xlabel(xlabel, fontsize=self.fontsize, fontfamily=self.fontfamily)
         if ylabel is not None:
@@ -112,7 +113,7 @@ class Plotter:
 
         self._format_axis(
             ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
+            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
             ylabel=ylabel,
             scale=scale,
         )
@@ -157,7 +158,7 @@ class Plotter:
 
         self._format_axis(
             ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
+            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
             ylabel="Training Loss",
             scale=scale,
         )
@@ -204,7 +205,7 @@ class Plotter:
 
         self._format_axis(
             ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
+            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
             ylabel="Validation Loss",
             scale=scale,
         )
@@ -274,7 +275,7 @@ class Plotter:
 
         self._format_axis(
             ax1,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
+            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
             ylabel=None,
             scale=scale,
         )
@@ -308,7 +309,7 @@ class Plotter:
 
         self._format_axis(
             ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
+            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
             ylabel=ylabel,
             scale=scale,
         )
@@ -351,8 +352,8 @@ class Plotter:
 
             self._format_axis(
                 ax,
-                xlabel="Epoch" if scale is None else f"Epoch (×{scale/1000}k)",
-                ylabel=f"Inverse Parameter {j+1}",
+                xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
+                ylabel=f"Inverse Parameter {j + 1}",
                 scale=scale,
             )
             plt.tight_layout()
@@ -360,7 +361,7 @@ class Plotter:
             if savepath is not None:
                 os.makedirs(savepath, exist_ok=True)
                 plt.savefig(
-                    os.path.join(savepath, f"inv_param_{j+1}.png"),
+                    os.path.join(savepath, f"inv_param_{j + 1}.png"),
                     bbox_inches="tight",
                 )
 
