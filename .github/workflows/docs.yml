@@ -24,7 +24,6 @@ jobs:
         with:
           path: docs/_build/html
 
-  # Publish only from main; other branches and pull requests just check the build.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
