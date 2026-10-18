@@ -1,11 +1,44 @@
-"""Nox sessions for pinnse. Run `nox -s docs` to build the documentation."""
+"""
+Nox sessions for pinnse.
+"""
+
+import glob
+import shutil
 
 import nox
 
 nox.options.sessions = ["docs"]
 
-# CPU-only PyTorch is enough to import pinnse for autodoc, and much smaller.
 TORCH_CPU = "https://download.pytorch.org/whl/cpu"
+
+
+@nox.session
+def tests(session: nox.Session) -> None:
+    """Run the test suite; fails if coverage drops below the configured 100%."""
+    session.install("torch", "--index-url", TORCH_CPU)
+    session.install("-e", ".", "pytest", "pytest-cov")
+    session.run("pytest", *session.posargs)
+
+
+@nox.session
+def build(session: nox.Session) -> None:
+    """Build the sdist and wheel into dist/, validate them, and import the wheel."""
+    session.install("build", "twine")
+    shutil.rmtree("dist", ignore_errors=True)
+    session.run("python", "-m", "build")
+    session.run("twine", "check", "--strict", *glob.glob("dist/*"))
+
+    session.install("torch", "--index-url", TORCH_CPU)
+    session.install(*glob.glob("dist/*.whl"))
+    session.chdir(session.create_tmp())
+    session.run(
+        "python",
+        "-c",
+        "import pinnse; "
+        "missing = [n for n in pinnse.__all__ if not hasattr(pinnse, n)]; "
+        "assert not missing, missing; "
+        "print('pinnse', pinnse.__file__)",
+    )
 
 
 @nox.session

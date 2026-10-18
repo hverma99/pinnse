@@ -17,6 +17,9 @@ coverage.xml
 # Ruff
 .ruff_cache/
 
+# Nox session environments
+.nox/
+
 # Checkpoints, training histories and figures written by main.py / check.py
 examples/**/logs/
 examples/**/figures/
