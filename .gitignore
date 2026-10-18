@@ -1,12 +1,31 @@
-pinnse.egg-info/
 __pycache__/
-dist/
+
+# Packaging and build artifacts (python -m build, pip install -e .)
 build/
+dist/
 *.egg-info/
-*.out
-*.docx
-*.md
-*.pdf
+
+# Virtual environment
 .venv/
-.coverage
+
+# pytest and pytest-cov
 .pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Ruff
+.ruff_cache/
+
+# Checkpoints, training histories and figures written by main.py / check.py
+examples/**/logs/
+examples/**/figures/
+examples/**/compare/
+
+# SLURM job logs from run.sh
+*.out
+
+*.docx
+*.pdf
+*.md
+!README.md
