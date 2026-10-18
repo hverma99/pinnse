@@ -774,12 +774,13 @@ class Noise:
             a dictionary specifies the level per column name.
         mode : str, optional, default="relative"
             Noise model:
-            - "relative"     : sigma = noise_level * std(column), homoscedastic
-                               noise scaled by the spread of each variable.
-            - "proportional" : sigma = noise_level * |value|, heteroscedastic
-                               noise proportional to the measured magnitude,
-                               typical of flow and composition sensors.
-            - "absolute"     : sigma = noise_level, in the units of the column.
+
+            - ``"relative"``: ``sigma = noise_level * std(column)``,
+              homoscedastic noise scaled by the spread of each variable.
+            - ``"proportional"``: ``sigma = noise_level * |value|``,
+              heteroscedastic noise proportional to the measured magnitude,
+              typical of flow and composition sensors.
+            - ``"absolute"``: ``sigma = noise_level``, in the units of the column.
         noise_cols : list[str], optional
             Columns to perturb. If None, all columns are perturbed.
         clip_min : float, optional

@@ -57,6 +57,12 @@ examples = [
     "scikit-learn",
     "openpyxl"
 ]
+docs = [
+    "sphinx>=7",
+    "furo",
+    "myst_parser>=0.13",
+    "sphinx_copybutton"
+]
 aspen = [
     "pywin32"
 ]

@@ -103,7 +103,7 @@ class DataModule:
 
         alpha : float, optional, default=1.0
             Dirichlet concentration parameter used for sampling molar-fraction
-            variables whose names start with 'Z_', 'X_', or 'Y_'.
+            variables whose names start with ``Z_``, ``X_``, or ``Y_``.
             A value of 1.0 gives a uniform distribution over the simplex.
 
         drop_last : bool, optional, default=False
@@ -118,8 +118,8 @@ class DataModule:
 
         Notes
         -----
-        - Variables with prefixes 'Z_', 'X_', and 'Y_' are sampled using
-        Dirichlet distributions so that each group sums to 1.
+        - Variables with prefixes ``Z_``, ``X_``, and ``Y_`` are sampled using
+          Dirichlet distributions so that each group sums to 1.
         - All other input variables are sampled using Latin Hypercube Sampling
         """
         rng = np.random.default_rng(self.random_state)
@@ -274,6 +274,7 @@ class DataModule:
         ------
         loader : torch.utils.data.DataLoader
             DataLoader to save. The loader may contain either:
+
             - labeled batches of the form (X, Y), or
             - unlabeled batches of the form (X,).
 
@@ -286,7 +287,7 @@ class DataModule:
         Notes
         -----
         - For labeled loaders, the saved file contains both input and output
-        columns concatenated side by side.
+          columns concatenated side by side.
         - For unlabeled loaders, only the input columns are saved.
         """
         X_all, Y_all = [], []
