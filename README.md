@@ -652,7 +652,6 @@ If you use `pinnse`, please cite the associated paper:
 
 > Verma, H. and Maravelias C.T. "A Generalized Framework for Physics-Informed Neural Networks in Process Systems Engineering." Computers & Chemical Engineering, 2026, 109939, ISSN 0098-1354, https://doi.org/10.1016/j.compchemeng.2026.109939.
 
-A BibTeX entry will be added here upon publication.
 
 ---
 
