@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinnse"
-version = "0.1.0"
+version = "0.2.0"
 description = "A modular PyTorch framework for developing physics-informed neural network surrogate models for chemical process modeling, simulation, and process systems engineering."
 readme = "README.md"
 requires-python = ">=3.10"
