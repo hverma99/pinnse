@@ -88,6 +88,7 @@ def main():
         phys_residual=physics,
         bnd_residual=boundary,
         ckpt_path="./logs/best_model.pth",
+        log_grad_norms=True,  # record gradient-norm histories for the plots
         phys_weight=1.0,
         bnd_weight=1.0,
         adapt_wts=False,
