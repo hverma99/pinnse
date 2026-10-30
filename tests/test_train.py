@@ -70,6 +70,7 @@ def make_trainer(tmp_path, phys=True, bnd=True, lr=1e-2, model=None, **kw):
         ckpt_path=str(tmp_path / "best.pth"),
         phys_weight=1.0 if phys else 0.0,
         bnd_weight=1.0 if bnd else 0.0,
+        log_grad_norms=True,
     )
     defaults.update(kw)
     return Training(**defaults)
@@ -103,6 +104,32 @@ def test_grad_norm_is_zero_without_dependence_on_parameters(tmp_path):
 
 
 # -------------------------------- train_epoch --------------------------------
+def test_gradient_norms_logged_only_on_request(tmp_path, monkeypatch):
+    # By default (no adaptive weights) the extra backward passes are skipped
+    # and the gradient histories are recorded as zeros.
+    t = make_trainer(tmp_path, log_grad_norms=False)
+    monkeypatch.setattr(
+        t, "grad_norm", lambda loss: pytest.fail("grad_norm should not run")
+    )
+    stats = t.train_epoch()
+    assert (stats["avg_grad_d"], stats["avg_grad_p"], stats["avg_grad_b"]) == (
+        0.0,
+        0.0,
+        0.0,
+    )
+    assert stats["data_loss"] > 0
+
+    # Adaptive weighting needs the norms, so it switches the logging on.
+    assert make_trainer(tmp_path, log_grad_norms=False, adapt_wts=True).log_grad_norms
+
+
+def test_checkpoint_directory_is_created(tmp_path):
+    ckpt = tmp_path / "nested" / "dir" / "best.pth"
+    t = make_trainer(tmp_path, phys=False, bnd=False, ckpt_path=str(ckpt))
+    t.adam_step(epochs=1, val_every=1, verbose=False)
+    assert ckpt.exists()
+
+
 def test_train_epoch_data_only(tmp_path):
     t = make_trainer(tmp_path, phys=False, bnd=False)
     before = params_of(t.model)
@@ -439,7 +466,8 @@ def test_adam_step_custom_weight_scheme(tmp_path):
     assert h["wt_bnd"] == pytest.approx([1.6, 0.9 * 1.6 + 0.7])
 
 
-def test_adaptive_weights_need_both_residual_weights(tmp_path):
+def test_adaptive_weights_adapt_only_active_weights(tmp_path):
+    # A zero weight disables its loss and stays zero; the other weight adapts.
     called = []
     t = make_trainer(
         tmp_path,
@@ -449,8 +477,81 @@ def test_adaptive_weights_need_both_residual_weights(tmp_path):
     )
     t.wt_update_every = 1
     h = t.adam_step(epochs=2, val_every=2, verbose=False)
-    assert h["wt_phys"] == [1.0, 1.0] and h["wt_bnd"] == [0.0, 0.0]
-    assert called == []
+    assert h["wt_phys"] == pytest.approx([1.8, 0.9 * 1.8 + 0.9])
+    assert h["wt_bnd"] == [0.0, 0.0]
+    assert len(called) == 2
+
+
+def test_default_adaptive_weights_with_single_residual(tmp_path):
+    t = make_trainer(tmp_path, phys=False, adapt_wts=True)
+    t.wt_update_every = 1
+    h = t.adam_step(epochs=2, val_every=2, verbose=False)
+    assert h["wt_phys"] == [0.0, 0.0]
+    assert h["wt_bnd"][0] != 1.0 and h["wt_bnd"][1] != h["wt_bnd"][0]
+
+
+def test_adam_step_raises_when_no_validation_epoch_is_reached(tmp_path):
+    t = make_trainer(tmp_path, phys=False, bnd=False)
+    with pytest.raises(RuntimeError, match="No checkpoint was written"):
+        t.adam_step(epochs=1, val_every=2, verbose=False)
+    assert not (tmp_path / "best.pth").exists()
+
+
+def test_adam_step_ignores_non_finite_validation_losses(tmp_path):
+    t = make_trainer(tmp_path, phys=False, bnd=False)
+    nan = float("nan")
+    scripted = iter([(nan, 0.0, 0.0), (1.0, 0.0, 0.0), (nan, 0.0, 0.0)])
+    snapshots = []
+
+    def fake_validate(loader):
+        if loader is t.test_loader:
+            return 0.0, 0.0, 0.0
+        snapshots.append(copy.deepcopy(t.model.state_dict()))
+        return next(scripted)
+
+    t.validate_test = fake_validate
+    t.adam_step(epochs=3, val_every=1, verbose=False)
+    for k, v in t.model.state_dict().items():
+        torch.testing.assert_close(v, snapshots[1][k])
+
+
+def test_adam_step_raises_when_every_validation_loss_is_non_finite(tmp_path):
+    # A stale checkpoint from an earlier run must not be reloaded silently.
+    t = make_trainer(tmp_path, phys=False, bnd=False)
+    stale = {"model_state_dict": {"marker": torch.tensor(1.0)}}
+    torch.save(stale, t.ckpt_path)
+    t.validate_test = lambda loader: (float("inf"), 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="non-finite"):
+        t.adam_step(epochs=2, val_every=1, verbose=False)
+    assert torch.load(t.ckpt_path)["model_state_dict"].keys() == {"marker"}
+
+
+def test_checkpoint_restores_inverse_parameter_of_best_epoch(tmp_path):
+    theta = nn.Parameter(torch.tensor([1.5]))
+
+    def phys_theta(x, y):
+        dy = torch.autograd.grad(y, x, torch.ones_like(y), create_graph=True)[0]
+        return dy - theta * x
+
+    t = make_trainer(tmp_path, theta=theta, phys_residual=phys_theta, bnd=False)
+    scripted = iter([(3.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)])
+    thetas = []
+    real_validate = t.validate_test
+
+    def fake_validate(loader):
+        if loader is t.test_loader:
+            return real_validate(loader)
+        thetas.append(theta.detach().clone())
+        return next(scripted)
+
+    t.validate_test = fake_validate
+    h = t.adam_step(epochs=3, val_every=1, verbose=False)
+
+    assert not torch.equal(thetas[1], thetas[2])
+    torch.testing.assert_close(theta.detach(), thetas[1])
+    torch.testing.assert_close(torch.load(t.ckpt_path)["theta"], thetas[1])
+    # the recorded history still follows the parameter epoch by epoch
+    assert len(h["inv_param"]) == 3
 
 
 def test_adam_step_records_inverse_parameter(tmp_path):
@@ -538,6 +639,23 @@ def test_lbfgs_reduces_loss_and_keeps_best_state(tmp_path, capsys):
         final = t.loss_fn(t.model(X), Y).item()
     assert final == pytest.approx(min(h["loss_t"]), rel=1e-5)
     assert "LBFGS Step: 10" in capsys.readouterr().out
+
+
+def test_lbfgs_optimizes_and_restores_inverse_parameter(tmp_path):
+    theta = nn.Parameter(torch.tensor([1.5]))
+
+    def phys_theta(x, y):
+        dy = torch.autograd.grad(y, x, torch.ones_like(y), create_graph=True)[0]
+        return dy - theta * x
+
+    t = make_trainer(tmp_path, theta=theta, phys_residual=phys_theta, bnd=False)
+    t._save_checkpoint()
+    assert any(p is theta for p in t.agg_params)
+
+    h = t.lbfgs_step(mode="physics", N_LBFGS=5, verbose=False)
+    assert theta.item() != 1.5
+    assert min(h["loss_p"]) < h["loss_p"][0] or h["loss_p"][-1] == min(h["loss_p"])
+    torch.testing.assert_close(torch.load(t.ckpt_path)["theta"], theta.detach())
 
 
 def test_lbfgs_without_collocation_data(tmp_path):

@@ -65,10 +65,8 @@ def test_epoch_axes():
 # ------------------------------ individual plots -----------------------------
 def test_individual_training_loss(tmp_path):
     h = full_history()
-    path = tmp_path / "loss.png"
-    Plotter(h, fontsize=10, dpi=50).plot_individual_loss(
-        "loss_d", ylabel="Data", savepath=str(path)
-    )
+    p = Plotter(h, fontsize=10, dpi=50)
+    p.plot_individual_loss("loss_d", ylabel="Data")
 
     ax = only_figure().axes[0]
     raw, smooth = ax.lines
@@ -77,7 +75,12 @@ def test_individual_training_loss(tmp_path):
     np.testing.assert_allclose(smooth.get_ydata(), Plotter._smooth(h["loss_d"], 0.05))
     assert ax.get_yscale() == "log"
     assert ax.get_xlabel() == "Epoch" and ax.get_ylabel() == "Data"
-    assert path.exists()
+
+    # saving writes the file and closes the figure
+    plt.close("all")
+    path = tmp_path / "loss.png"
+    p.plot_individual_loss("loss_d", ylabel="Data", savepath=str(path))
+    assert path.exists() and no_figures()
 
 
 def test_individual_validation_loss_uses_validation_epochs():
@@ -103,13 +106,17 @@ def test_individual_loss_skips_missing_or_zero_history(value):
 
 def test_gradient_history(tmp_path):
     h = full_history()
-    path = tmp_path / "grad.png"
-    Plotter(h, dpi=50).plot_gradient_history(
-        "grad_phys_hist", ylabel="G", color="red", savepath=str(path)
-    )
+    Plotter(h, dpi=50).plot_gradient_history("grad_phys_hist", ylabel="G", color="red")
     ax = only_figure().axes[0]
     np.testing.assert_allclose(ax.lines[0].get_ydata(), h["grad_phys_hist"])
-    assert ax.get_ylabel() == "G" and path.exists()
+    assert ax.get_ylabel() == "G"
+
+    plt.close("all")
+    path = tmp_path / "grad.png"
+    Plotter(h, dpi=50).plot_gradient_history(
+        "grad_phys_hist", ylabel="G", savepath=str(path)
+    )
+    assert path.exists() and no_figures()
 
     plt.close("all")
     Plotter({"grad_phys_hist": [0.0] * 5}).plot_gradient_history(
@@ -122,8 +129,8 @@ def test_gradient_history(tmp_path):
 def test_all_train_losses_legend_lists_nonzero_terms(tmp_path):
     h = full_history()
     h["loss_b"] = [0.0] * 20
-    path = tmp_path / "train.png"
-    Plotter(h, dpi=50).plot_all_train_losses(savepath=str(path))
+    p = Plotter(h, dpi=50)
+    p.plot_all_train_losses()
 
     ax = only_figure().axes[0]
     assert [t.get_text() for t in ax.get_legend().get_texts()] == [
@@ -131,14 +138,19 @@ def test_all_train_losses_legend_lists_nonzero_terms(tmp_path):
         "Data Loss",
         "Physics Loss",
     ]
-    assert ax.get_ylabel() == "Training Loss" and path.exists()
+    assert ax.get_ylabel() == "Training Loss"
+
+    plt.close("all")
+    path = tmp_path / "train.png"
+    p.plot_all_train_losses(savepath=str(path))
+    assert path.exists() and no_figures()
 
 
 def test_all_val_losses_legend_and_axis(tmp_path):
     h = full_history()
     del h["val_loss_p"]
-    path = tmp_path / "val.png"
-    Plotter(h, val_every=10, dpi=50).plot_all_val_losses(savepath=str(path))
+    p = Plotter(h, val_every=10, dpi=50)
+    p.plot_all_val_losses()
 
     ax = only_figure().axes[0]
     assert [t.get_text() for t in ax.get_legend().get_texts()] == [
@@ -147,7 +159,11 @@ def test_all_val_losses_legend_and_axis(tmp_path):
         "Boundary Loss",
     ]
     np.testing.assert_array_equal(ax.lines[0].get_xdata(), [10, 20, 30, 40])
-    assert path.exists()
+
+    plt.close("all")
+    path = tmp_path / "val.png"
+    p.plot_all_val_losses(savepath=str(path))
+    assert path.exists() and no_figures()
 
 
 def test_combined_loss_plots_skip_empty_history():
@@ -159,14 +175,17 @@ def test_combined_loss_plots_skip_empty_history():
 
 def test_weights_on_twin_axes(tmp_path):
     h = full_history()
-    path = tmp_path / "w.png"
-    Plotter(h, dpi=50).plot_weights(savepath=str(path))
+    Plotter(h, dpi=50).plot_weights()
 
     ax1, ax2 = only_figure().axes
     np.testing.assert_allclose(ax1.lines[0].get_ydata(), h["wt_phys"])
     np.testing.assert_allclose(ax2.lines[0].get_ydata(), h["wt_bnd"])
     assert "lambda_P" in ax1.get_ylabel() and "lambda_B" in ax2.get_ylabel()
-    assert path.exists()
+
+    plt.close("all")
+    path = tmp_path / "w.png"
+    Plotter(h, dpi=50).plot_weights(savepath=str(path))
+    assert path.exists() and no_figures()
 
 
 @pytest.mark.parametrize("present", ["wt_phys", "wt_bnd"])
@@ -188,15 +207,20 @@ def test_inverse_params_one_figure_per_parameter(tmp_path):
     h = {
         "inv_param": [np.array([1.0, 0.0]), np.array([1.5, 0.0]), np.array([2.0, 0.0])]
     }
-    out = tmp_path / "inv"
-    Plotter(h, val_every=100, dpi=50).plot_inverse_params(savepath=str(out))
+    p = Plotter(h, val_every=100, dpi=50)
+    p.plot_inverse_params()
 
     # the second parameter is identically zero, so only one figure is drawn
     ax = only_figure().axes[0]
     np.testing.assert_array_equal(ax.lines[0].get_xdata(), [100, 200, 300])
     np.testing.assert_allclose(ax.lines[0].get_ydata(), [1.0, 1.5, 2.0])
     assert ax.get_ylabel() == "Inverse Parameter 1"
+
+    plt.close("all")
+    out = tmp_path / "inv"
+    p.plot_inverse_params(savepath=str(out))
     assert sorted(p.name for p in out.iterdir()) == ["inv_param_1.png"]
+    assert no_figures()
 
 
 def test_inverse_params_scalar_history_without_saving():
@@ -239,6 +263,8 @@ def test_plot_everything_writes_every_figure(tmp_path):
         "inv_param_1.png",
         "inv_param_2.png",
     ]
+    # every saved figure is closed again
+    assert no_figures()
 
 
 def test_plot_everything_without_saving(tmp_path, monkeypatch):

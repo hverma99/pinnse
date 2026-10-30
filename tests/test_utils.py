@@ -187,6 +187,24 @@ def test_max_abs_round_trip(frame):
     pd.testing.assert_frame_equal(Denormalization.max_abs(norm, metrics), frame)
 
 
+def test_normalizations_map_constant_columns_to_zero():
+    df = pd.DataFrame({"k": [2.0, 2.0, 2.0], "a": [1.0, 2.0, 3.0]})
+
+    norm, metrics = Normalization.min_max(df)
+    assert norm["k"].tolist() == [0.0, 0.0, 0.0]
+    assert metrics["k"] == {"min": 2.0, "max": 2.0}
+    np.testing.assert_allclose(norm["a"], [0.0, 0.5, 1.0])
+    assert Normalization.min_max_defined_metrics(df, metrics)["k"].tolist() == [0.0] * 3
+
+    norm, _ = Normalization.mean_norm(df)
+    assert norm["k"].tolist() == [0.0, 0.0, 0.0]
+    np.testing.assert_allclose(norm["a"], [-0.5, 0.0, 0.5])
+
+    norm, _ = Normalization.z_score(df)
+    assert norm["k"].tolist() == [0.0, 0.0, 0.0]
+    assert not norm.isna().any().any()
+
+
 def test_mean_norm_round_trip(frame):
     norm, metrics = Normalization.mean_norm(frame)
     np.testing.assert_allclose(norm.mean(), 0, atol=1e-12)

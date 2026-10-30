@@ -66,6 +66,23 @@ def test_labeled_loaders_record_input_bounds(module, tabular_data):
     np.testing.assert_allclose(dm.upper_bnd, I_S.max().to_numpy(), rtol=1e-6)
 
 
+def test_colloc_loaders_do_not_depend_on_labeled_loader(tabular_data):
+    I_S, D_S = tabular_data
+    dm = DataModule(
+        I_S_data=I_S,
+        D_S_data=D_S,
+        labeled_data_batch_size=16,
+        physics_coll_data_size=32,
+        physics_coll_batch_size=16,
+        boundary_coll_data_size=16,
+        boundry_coll_batch_size=8,
+    )
+    # bounds are available from construction, so either loader may come first
+    np.testing.assert_allclose(dm.lower_bnd, I_S.min().to_numpy(), rtol=1e-6)
+    assert gather(dm.phys_colloc_loader()).shape == (32, I_S.shape[1])
+    assert gather(dm.bnd_colloc_loader()).shape == (16, I_S.shape[1])
+
+
 def test_labeled_split_is_reproducible(tabular_data):
     I_S, D_S = tabular_data
 
