@@ -183,6 +183,7 @@ def main():
         phys_coll_loader=phys_coll_loader,
         phys_residual=physics,
         ckpt_path="./logs/best_model.pth",
+        log_grad_norms=True,  # record gradient-norm histories for the plots
         phys_weight=PHYS_WEIGHT,
         bnd_weight=0.0,
         adapt_wts=False,

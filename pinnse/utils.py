@@ -6,7 +6,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 
-from pinnse import ANN
+from .PINNs import ANN
 
 
 class Normalization:
@@ -33,7 +33,8 @@ class Normalization:
         cols = normalize_cols if normalize_cols is not None else list(data.columns)
         for col in cols:
             cmin, cmax = data[col].min(), data[col].max()
-            data_norm[col] = (data[col] - cmin) / (cmax - cmin)
+            # A constant column has no range; map it to 0 rather than NaN.
+            data_norm[col] = (data[col] - cmin) / (cmax - cmin) if cmax != cmin else 0.0
             metrics[col] = {"min": float(cmin), "max": float(cmax)}
         return data_norm, metrics
 
@@ -46,7 +47,9 @@ class Normalization:
         for col, vals in metrics.items():
             cmin = vals["min"]
             cmax = vals["max"]
-            data_norm[col] = (data_norm[col] - cmin) / (cmax - cmin)
+            data_norm[col] = (
+                (data_norm[col] - cmin) / (cmax - cmin) if cmax != cmin else 0.0
+            )
         return data_norm
 
     @staticmethod
@@ -271,7 +274,9 @@ class Normalization:
         for col in cols:
             cmin, cmax = data[col].min(), data[col].max()
             cmean = data[col].mean()
-            data_norm[col] = (data[col] - cmean) / (cmax - cmin)
+            data_norm[col] = (
+                (data[col] - cmean) / (cmax - cmin) if cmax != cmin else 0.0
+            )
             metrics[col] = {
                 "max": float(cmax),
                 "min": float(cmin),
@@ -302,7 +307,7 @@ class Normalization:
         cols = normalize_cols if normalize_cols is not None else list(data.columns)
         for col in cols:
             cmean, cstd = data[col].mean(), data[col].std()
-            data_norm[col] = (data[col] - cmean) / cstd
+            data_norm[col] = (data[col] - cmean) / cstd if cstd != 0 else 0.0
             metrics[col] = {"mean": float(cmean), "std": float(cstd)}
         return data_norm, metrics
 

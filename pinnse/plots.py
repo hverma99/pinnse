@@ -34,6 +34,11 @@ class Plotter:
         dpi : int, optional, default=300
 
         figsize : tuple, optional, default=(8, 6)
+
+        Notes
+        -----
+        - When `savepath` is given, each figure is written to disk and closed;
+          otherwise figures are left open for interactive display.
         """
         self.history = history
         self.val_every = val_every
@@ -122,6 +127,7 @@ class Plotter:
 
         if savepath is not None:
             plt.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
 
     def plot_all_train_losses(
         self,
@@ -169,6 +175,7 @@ class Plotter:
 
         if savepath is not None:
             plt.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
 
     def plot_all_val_losses(
         self,
@@ -216,6 +223,7 @@ class Plotter:
 
         if savepath is not None:
             plt.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
 
     def plot_weights(
         self,
@@ -283,6 +291,7 @@ class Plotter:
 
         if savepath is not None:
             plt.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
 
     def plot_gradient_history(
         self,
@@ -317,6 +326,7 @@ class Plotter:
 
         if savepath is not None:
             plt.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
 
     def plot_inverse_params(
         self,
@@ -364,6 +374,7 @@ class Plotter:
                     os.path.join(savepath, f"inv_param_{j + 1}.png"),
                     bbox_inches="tight",
                 )
+                plt.close(fig)
 
     def plot_everything(self, savepath: str | None = None, scale: float | None = None):
         """

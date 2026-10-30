@@ -211,6 +211,10 @@ class Fourier_ANN(nn.Module):
         Number of Fourier frequency levels used to augment the last input
         coordinate.
 
+    positive_output : bool, optional, default=False
+        If True, a Softplus activation is applied to the final network output
+        to enforce nonnegative predictions.
+
     Returns
     -------
     torch.Tensor
@@ -224,8 +228,8 @@ class Fourier_ANN(nn.Module):
       by its Fourier-feature representation.
     - The augmented feature vector is then passed through a standard
       feedforward neural network.
-    - A Softplus activation is applied to the final network output to enforce
-      nonnegative predictions.
+    - With `positive_output=True`, a Softplus activation is applied to the
+      final network output to enforce nonnegative predictions.
     """
 
     def __init__(

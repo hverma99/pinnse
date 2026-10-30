@@ -50,6 +50,12 @@ class DataModule:
         self.val_frac = val_frac
         self.random_state = random_state
 
+        # Input bounds over the whole labeled dataset, used by the collocation
+        # loaders, so that those may be built in any order.
+        X = self.I_S_data.to_numpy(dtype=np.float32)
+        self.lower_bnd = X.min(axis=0)
+        self.upper_bnd = X.max(axis=0)
+
     def labeled_data_loader(self):
         """
         Construct labeled DataLoaders for training, validation, and test datasets.
@@ -72,9 +78,6 @@ class DataModule:
         """
         X = self.I_S_data.to_numpy(dtype=np.float32)
         Y = self.D_S_data.to_numpy(dtype=np.float32)
-
-        self.lower_bnd = X.min(axis=0)
-        self.upper_bnd = X.max(axis=0)
 
         X_tv, X_test, Y_tv, Y_test = train_test_split(
             X, Y, test_size=self.test_frac, random_state=self.random_state

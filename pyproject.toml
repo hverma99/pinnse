@@ -44,12 +44,12 @@ maintainers = [
 
 dependencies = [
     "numpy",
-    "scipy",
-    "torch",
+    "scipy>=1.15",        # qmc samplers take an ``rng`` argument
+    "torch>=2.0",         # torch.optim.lr_scheduler.LRScheduler
     "pandas",
     "tqdm",
     "scikit-learn",
-    "matplotlib",
+    "matplotlib>=3.8",    # Axes.tick_params(labelfontfamily=...)
     "openpyxl"
 ]
 
