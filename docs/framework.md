@@ -85,10 +85,12 @@ Key constructor parameters:
 | Parameter | Description |
 |---|---|
 | `phys_weight`, `bnd_weight` | Scalar weights for the physics and boundary losses. Set to `0.0` to disable a loss. |
-| `adapt_wts` | If `True`, adjusts `phys_weight` and `bnd_weight` every 10 epochs by gradient-norm balancing. Requires both weights to be nonzero. |
+| `adapt_wts` | If `True`, adjusts `phys_weight` and `bnd_weight` every 10 epochs by gradient-norm balancing. A weight set to `0.0` stays off. |
 | `theta` | An `nn.Parameter` of trainable physical parameters (activation energies, for example) for inverse problems, optimized alongside the network weights. |
-| `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True` and both weights are nonzero. |
+| `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True`. |
 | `grad_aggregator` | Optional callable that combines the per-loss gradients itself, replacing the default weighted-sum update. {class}`~pinnse.PCGrad` is provided. |
+| `log_grad_norms` | If `True`, records the per-epoch gradient norms of the data, physics and boundary losses (`grad_data_hist`, `grad_phys_hist`, `grad_bnd_hist`). Each costs an extra backward pass per batch, so they are computed only on request or when `adapt_wts=True`; otherwise the histories are zeros. |
+| `ckpt_path` | Where the best model (by validation loss) is saved and restored from at the end of training. For inverse problems `theta` is stored alongside and restored with it. Non-finite validation losses never count as improvements, and training raises an error if no checkpoint was written. |
 
 ### Custom loss weighting and gradient aggregation
 
@@ -112,10 +114,10 @@ training = Training(
 )
 ```
 
-Adaptive weighting, built-in or custom, runs only when both `phys_weight` and
-`bnd_weight` are nonzero. With a single residual loss (for example
-`bnd_weight=0.0`), the weights stay fixed. Guard divisions against zero
-gradient norms, as above.
+Adaptive weighting, built-in or custom, acts only on weights that are
+nonzero: a weight set to `0.0` disables its loss and stays at zero, so with a
+single residual loss (for example `bnd_weight=0.0`) only the other weight
+adapts. Guard divisions against zero gradient norms, as above.
 
 Gradient-norm weighting balances only the *magnitudes* of the loss gradients.
 {class}`~pinnse.PCGrad` (Yu et al., 2020) also resolves conflicts in their

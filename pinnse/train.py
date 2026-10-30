@@ -1,3 +1,5 @@
+import math
+import os
 import random
 from itertools import cycle
 from typing import Callable, Optional, Union
@@ -139,8 +141,19 @@ class Training(object):
         theta: Optional[torch.nn.Parameter] = None,
         grad_aggregator: Optional[Callable] = None,
         weight_scheme: Optional[Callable] = None,
+        log_grad_norms: bool = False,
     ):
-
+        """
+        Inputs
+        ------
+        log_grad_norms : bool, optional, default=False
+            Whether to record the per-epoch gradient norms of the data, physics
+            and boundary losses (`grad_data_hist`, `grad_phys_hist`,
+            `grad_bnd_hist`). Each norm costs an additional backward pass per
+            batch, so they are computed only when requested here or when
+            `adapt_wts=True`, which needs them; otherwise the histories are
+            recorded as zeros.
+        """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -160,6 +173,9 @@ class Training(object):
         self.theta = theta
         self.grad_aggregator = grad_aggregator
         self.weight_scheme = weight_scheme
+        self.log_grad_norms = bool(log_grad_norms or adapt_wts)
+
+        os.makedirs(os.path.dirname(self.ckpt_path) or ".", exist_ok=True)
 
         self.wt_update_every = 10
         self.wt_ema = 0.1
@@ -187,6 +203,22 @@ class Training(object):
         # adaptive weights are computed with respect to the network parameters only.
         if self.theta is not None and self.theta.requires_grad:
             self.agg_params.append(self.theta)
+
+    def _save_checkpoint(self):
+        """Save the model state and, for inverse problems, the current theta."""
+        state = {"model_state_dict": self.model.state_dict()}
+        if self.theta is not None:
+            state["theta"] = self.theta.detach().cpu().clone()
+        torch.save(state, self.ckpt_path)
+
+    def _load_checkpoint(self):
+        """Restore the model state and, when stored, theta from the checkpoint."""
+        ckpt = torch.load(self.ckpt_path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model_state_dict"])
+        if self.theta is not None and "theta" in ckpt:
+            with torch.no_grad():
+                self.theta.copy_(ckpt["theta"])
+        return ckpt
 
     def grad_norm(self, loss):
         if loss is not None:
@@ -253,13 +285,10 @@ class Training(object):
                 bnd_coll_size = 0
                 lb = None
 
-            norm_data_loss = self.grad_norm(ld)
-            norm_phys_loss = self.grad_norm(lp)
-            norm_bnd_loss = self.grad_norm(lb)
-
-            grad_d_sum += norm_data_loss.item()
-            grad_p_sum += norm_phys_loss.item()
-            grad_b_sum += norm_bnd_loss.item()
+            if self.log_grad_norms:
+                grad_d_sum += self.grad_norm(ld).item()
+                grad_p_sum += self.grad_norm(lp).item()
+                grad_b_sum += self.grad_norm(lb).item()
             grad_count += 1
 
             if self.grad_aggregator is not None:
@@ -343,7 +372,6 @@ class Training(object):
             self.phys_weight != 0
             and self.phys_residual is not None
             and len(self.all_phys_colloc_batches) > 0
-            and n_sample > 0
         ):
             sampled_phys_coll_batches = random.sample(
                 self.all_phys_colloc_batches, n_sample
@@ -369,7 +397,6 @@ class Training(object):
             self.bnd_weight != 0
             and self.bnd_residual is not None
             and len(self.all_bnd_colloc_batches) > 0
-            and n_sample > 0
         ):
             sampled_bnd_coll_batches = random.sample(
                 self.all_bnd_colloc_batches, n_sample
@@ -389,6 +416,7 @@ class Training(object):
     def adam_step(self, epochs: int, val_every: int, verbose: bool = True):
 
         best_total = float("inf")
+        ckpt_saved = False
         loss_t, loss_d, loss_p, loss_b = [], [], [], []
         val_loss_t, val_loss_d, val_loss_p, val_loss_b = [], [], [], []
         wt_phys, wt_bnd = [], []
@@ -429,8 +457,7 @@ class Training(object):
             if (
                 self.adapt_wts
                 and (epoch % self.wt_update_every == 0)
-                and self.phys_weight != 0
-                and self.bnd_weight != 0
+                and (self.phys_weight != 0 or self.bnd_weight != 0)
             ):
                 grad_d = loss_stats["avg_grad_d"]
                 grad_p = loss_stats["avg_grad_p"]
@@ -441,26 +468,23 @@ class Training(object):
                     # The returned values are targets, smoothed below by the
                     # same exponential moving average as the default rule.
                     target_wp, target_wb = self.weight_scheme(grad_d, grad_p, grad_b)
+                else:
+                    # Default rule: move each weight toward the ratio of the
+                    # data-loss gradient norm to its own; a vanishing gradient
+                    # norm leaves that weight unchanged.
+                    target_wp = grad_d / (grad_p + 1e-12) if grad_p > 0.0 else None
+                    target_wb = grad_d / (grad_b + 1e-12) if grad_b > 0.0 else None
 
+                # A weight of zero disables its loss, so only active weights adapt.
+                if self.phys_weight and target_wp is not None:
                     self.phys_weight = (
                         1.0 - self.wt_ema
                     ) * self.phys_weight + self.wt_ema * target_wp
+
+                if self.bnd_weight and target_wb is not None:
                     self.bnd_weight = (
                         1.0 - self.wt_ema
                     ) * self.bnd_weight + self.wt_ema * target_wb
-
-                else:
-                    if self.phys_weight and grad_p > 0.0:
-                        target_wp = grad_d / (grad_p + 1e-12)
-                        self.phys_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.phys_weight + self.wt_ema * target_wp
-
-                    if self.bnd_weight and grad_b > 0.0:
-                        target_wb = grad_d / (grad_b + 1e-12)
-                        self.bnd_weight = (
-                            1.0 - self.wt_ema
-                        ) * self.bnd_weight + self.wt_ema * target_wb
 
             wt_phys.append(self.phys_weight)
             wt_bnd.append(self.bnd_weight)
@@ -483,11 +507,13 @@ class Training(object):
                         f"\tBoundary Loss: {val_bnd:.2e}"
                         f"\033[0m"
                     )
-                if val_total < best_total:
+                # A non-finite loss never counts as an improvement, so a run
+                # that diverges does not overwrite, or later reload, a usable
+                # checkpoint.
+                if math.isfinite(val_total) and val_total < best_total:
                     best_total = val_total
-                    torch.save(
-                        {"model_state_dict": self.model.state_dict()}, self.ckpt_path
-                    )
+                    self._save_checkpoint()
+                    ckpt_saved = True
 
                 if self.theta is not None:
                     inv_param.append(self.theta.detach().cpu().numpy().copy())
@@ -503,8 +529,14 @@ class Training(object):
                 self.scheduler.step()
         pbar.close()
 
-        ckpt = torch.load(self.ckpt_path, map_location=self.device)
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        if not ckpt_saved:
+            raise RuntimeError(
+                "No checkpoint was written during training: either no validation "
+                "epoch was reached (epochs < val_every) or every validation loss "
+                "was non-finite. The model has not been restored from "
+                f"{self.ckpt_path!r}."
+            )
+        self._load_checkpoint()
         test_data, test_phys, test_bnd = self.validate_test(loader=self.test_loader)
         test_total = (
             test_data + self.phys_weight * test_phys + self.bnd_weight * test_bnd
@@ -534,7 +566,9 @@ class Training(object):
 
     def lbfgs_step(self, mode: str, N_LBFGS: int = 50, verbose: bool = True):
         """
-            Second-phase full-batch LBFGS optimization.
+        Second-phase full-batch LBFGS optimization, started from the best
+        checkpoint written by `adam_step`. The trainable network parameters
+        and, for inverse problems, `theta` are optimized.
 
         Inputs
         ------
@@ -562,8 +596,6 @@ class Training(object):
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of: {valid_modes}")
 
-        ckpt = torch.load(self.ckpt_path, map_location=self.device)
-
         def gather_full_data(loader):
             X, Y = [], []
             for x_batch, y_batch in loader:
@@ -582,11 +614,12 @@ class Training(object):
         self.X_phys_all = gather_full_colloc(self.all_phys_colloc_batches)
         self.X_bnd_all = gather_full_colloc(self.all_bnd_colloc_batches)
 
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        self._load_checkpoint()
         self.model.train()
 
+        # Trainable network parameters plus, for inverse problems, theta.
         self.lbfgs = torch.optim.LBFGS(
-            self.model.parameters(),
+            self.agg_params,
             lr=1.0,
             max_iter=1,
             tolerance_grad=1e-9,
@@ -704,15 +737,12 @@ class Training(object):
                     f"Boundary Loss: {lb:.2e}"
                 )
 
-            if total < best_total:
+            if math.isfinite(total) and total < best_total:
                 best_total = total
-                torch.save(
-                    {"model_state_dict": self.model.state_dict()}, self.ckpt_path
-                )
+                self._save_checkpoint()
 
         pbar.close()
 
-        ckpt = torch.load(self.ckpt_path, map_location=self.device)
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        self._load_checkpoint()
 
         return history_lbfgs
