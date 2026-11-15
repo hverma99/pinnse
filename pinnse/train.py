@@ -1,15 +1,3 @@
-import math
-import os
-import random
-from itertools import cycle
-from typing import Callable, Optional, Union
-
-import torch
-from torch import nn
-from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
-
-from tqdm import tqdm
-
 """
 Training module for supervised and PINN models.
 
@@ -34,6 +22,28 @@ weights, and the trainable parameters, and is responsible for populating the
 parameter gradients. `PCGrad` is provided as a reference implementation; any
 other multi-objective strategy can be supplied without modifying this module.
 """
+
+import math
+import numbers
+import os
+import random
+from itertools import cycle
+from typing import Callable, Optional, Union
+
+import torch
+from torch import nn
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+
+from tqdm import tqdm
+
+CKPT_METRICS = ("total", "total_current", "data")
+
+
+def _require_positive_int(value, name: str) -> int:
+    """Return `value` as an int, rejecting non-integers and values below one."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral) or value < 1:
+        raise ValueError(f"{name} must be a positive integer; received {value!r}.")
+    return int(value)
 
 
 class PCGrad(object):
@@ -213,7 +223,7 @@ class Training(object):
 
     def _load_checkpoint(self):
         """Restore the model state and, when stored, theta from the checkpoint."""
-        ckpt = torch.load(self.ckpt_path, map_location=self.device)
+        ckpt = torch.load(self.ckpt_path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(ckpt["model_state_dict"])
         if self.theta is not None and "theta" in ckpt:
             with torch.no_grad():
