@@ -25,9 +25,49 @@ def _frac(value: Optional[float], default: float) -> float:
     return default if value is None else value
 
 
-def _generator(seed: Optional[int]) -> Optional[torch.Generator]:
-    """Return a seeded generator for DataLoader shuffling, or None (global RNG)."""
-    return None if seed is None else torch.Generator().manual_seed(seed)
+def _split_indices(
+    n: int, test_frac: float, val_frac: float, random_state: Optional[int]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Partition `range(n)` into training, validation and test indices.
+
+    The test partition is split off first, then the validation partition from
+    the remainder, both with scikit-learn's `train_test_split`.
+    """
+    idx_tv, idx_test = train_test_split(
+        np.arange(n), test_size=test_frac, random_state=random_state
+    )
+    idx_train, idx_val = train_test_split(
+        idx_tv, test_size=val_frac, random_state=random_state
+    )
+    return idx_train, idx_val, idx_test
+
+
+def _make_loader(
+    arrays,
+    batch_size: Optional[int],
+    shuffle: bool,
+    drop_last: bool = False,
+    shuffle_seed: Optional[int] = None,
+) -> DataLoader:
+    """
+    DataLoader over a `TensorDataset` of float arrays.
+
+    A shuffled loader draws its order from a generator seeded with
+    `shuffle_seed`, or from PyTorch's global generator if that is None.
+    """
+    generator = (
+        torch.Generator().manual_seed(shuffle_seed)
+        if shuffle and shuffle_seed is not None
+        else None
+    )
+    return DataLoader(
+        dataset=TensorDataset(*(torch.from_numpy(a) for a in arrays)),
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        generator=generator,
+    )
 
 
 def _require_size(value: Optional[int], name: str) -> int:
@@ -218,33 +258,18 @@ class DataModule:
         X = self.I_S_data.to_numpy(dtype=np.float32)
         Y = self.D_S_data.to_numpy(dtype=np.float32)
 
-        X_tv, X_test, Y_tv, Y_test = train_test_split(
-            X, Y, test_size=self.test_frac, random_state=self.random_state
+        splits = _split_indices(
+            len(X), self.test_frac, self.val_frac, self.random_state
         )
-        X_train, X_val, Y_train, Y_val = train_test_split(
-            X_tv, Y_tv, test_size=self.val_frac, random_state=self.random_state
-        )
-
-        def make_loader(
-            X: np.ndarray,
-            Y: np.ndarray,
-            shuffle: bool,
-            drop_last: bool = False,
-        ):
-            X_t = torch.from_numpy(X)
-            Y_t = torch.from_numpy(Y)
-            dataset = TensorDataset(X_t, Y_t)
-            return DataLoader(
-                dataset=dataset,
-                batch_size=self.labeled_data_batch_size,
-                shuffle=shuffle,
-                drop_last=drop_last,
-                generator=_generator(self.shuffle_seed) if shuffle else None,
+        train_loader, val_loader, test_loader = (
+            _make_loader(
+                (X[idx], Y[idx]),
+                self.labeled_data_batch_size,
+                shuffle=(i == 0),
+                shuffle_seed=self.shuffle_seed,
             )
-
-        train_loader = make_loader(X_train, Y_train, shuffle=True)
-        val_loader = make_loader(X_val, Y_val, shuffle=False)
-        test_loader = make_loader(X_test, Y_test, shuffle=False)
+            for i, idx in enumerate(splits)
+        )
 
         return train_loader, val_loader, test_loader
 
@@ -317,15 +342,12 @@ class DataModule:
 
         # Reassemble in original I_S column order
         X_coll = np.hstack([parts[col] for col in in_cols]).astype(np.float32)
-        X_coll = torch.from_numpy(X_coll)
-
-        dataset = TensorDataset(X_coll)
-        return DataLoader(
-            dataset=dataset,
-            batch_size=self.physics_coll_batch_size,
-            shuffle=shuffle,
-            drop_last=drop_last,
-            generator=_generator(self.shuffle_seed) if shuffle else None,
+        return _make_loader(
+            (X_coll,),
+            self.physics_coll_batch_size,
+            shuffle,
+            drop_last,
+            self.shuffle_seed,
         )
 
     def bnd_colloc_loader(
@@ -391,14 +413,8 @@ class DataModule:
         X_free = qmc.scale(unit, low, up).astype(np.float32)
 
         X_bc = np.hstack([X_free, np.full((N_bc, 1), bnd_value, dtype=np.float32)])
-        X_bc = torch.from_numpy(X_bc)
-        dataset = TensorDataset(X_bc)
-        return DataLoader(
-            dataset=dataset,
-            batch_size=self.boundry_coll_batch_size,
-            shuffle=shuffle,
-            drop_last=drop_last,
-            generator=_generator(self.shuffle_seed) if shuffle else None,
+        return _make_loader(
+            (X_bc,), self.boundry_coll_batch_size, shuffle, drop_last, self.shuffle_seed
         )
 
     def inspect_loader(self, name: str, loader: torch.utils.data.DataLoader):
@@ -610,12 +626,8 @@ class SequenceDataModule:
         ]
 
         # Partition by whole trajectory
-        idx = np.arange(self.n_traj)
-        idx_tv, self.idx_test = train_test_split(
-            idx, test_size=self.test_frac, random_state=self.random_state
-        )
-        self.idx_train, self.idx_val = train_test_split(
-            idx_tv, test_size=self.val_frac, random_state=self.random_state
+        self.idx_train, self.idx_val, self.idx_test = _split_indices(
+            self.n_traj, self.test_frac, self.val_frac, self.random_state
         )
 
     def labeled_data_loader(self):
@@ -642,19 +654,15 @@ class SequenceDataModule:
         X = self.I_S_data.astype(np.float32)
         Y = self.D_S_data.astype(np.float32)
 
-        def make_loader(idx: np.ndarray, shuffle: bool, drop_last: bool = False):
-            dataset = TensorDataset(torch.from_numpy(X[idx]), torch.from_numpy(Y[idx]))
-            return DataLoader(
-                dataset=dataset,
-                batch_size=self.labeled_data_batch_size,
-                shuffle=shuffle,
-                drop_last=drop_last,
-                generator=_generator(self.shuffle_seed) if shuffle else None,
+        train_loader, val_loader, test_loader = (
+            _make_loader(
+                (X[idx], Y[idx]),
+                self.labeled_data_batch_size,
+                shuffle=(i == 0),
+                shuffle_seed=self.shuffle_seed,
             )
-
-        train_loader = make_loader(self.idx_train, shuffle=True)
-        val_loader = make_loader(self.idx_val, shuffle=False)
-        test_loader = make_loader(self.idx_test, shuffle=False)
+            for i, idx in enumerate((self.idx_train, self.idx_val, self.idx_test))
+        )
 
         return train_loader, val_loader, test_loader
 
@@ -707,11 +715,10 @@ class SequenceDataModule:
             levels = lb + levels * (ub - lb)
             X_coll[:, :, col] = np.repeat(levels, per_seg, axis=1)[:, : self.seq_len]
 
-        dataset = TensorDataset(torch.from_numpy(X_coll))
-        return DataLoader(
-            dataset=dataset,
-            batch_size=self.physics_coll_batch_size,
-            shuffle=shuffle,
-            drop_last=drop_last,
-            generator=_generator(self.shuffle_seed) if shuffle else None,
+        return _make_loader(
+            (X_coll,),
+            self.physics_coll_batch_size,
+            shuffle,
+            drop_last,
+            self.shuffle_seed,
         )
