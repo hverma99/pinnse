@@ -76,27 +76,68 @@ Each example follows the same workflow, organized across a small set of files:
 
 | Method | Purpose |
 |---|---|
-| `adam_step(epochs, val_every)` | First-order training with Adam. Validates periodically and checkpoints the best model. |
+| `adam_step(epochs, val_every)` | First-order training with Adam. Validates periodically and checkpoints the best model. Options: `save_every`/`resume` (restartable runs), `progress` (progress bar). |
 | `lbfgs_step(mode, n_steps)` | Second-order refinement with L-BFGS (full batch, strong Wolfe line search). Modes: `"data"`, `"physics"`, `"boundary"`, `"combined"`, `"overall physics"`. |
 | `validate_test(loader)` | Evaluate data, physics, and boundary losses on a loader. |
+| `verify_residuals()` | Check each residual once on a collocation batch (shape, finite values, dependence on the output). Runs automatically before training. |
 
 Key constructor parameters:
 
 | Parameter | Description |
 |---|---|
 | `phys_weight`, `bnd_weight` | Scalar weights for the physics and boundary losses. Set to `0.0` to disable a loss. |
-| `adapt_wts` | If `True`, adjusts `phys_weight` and `bnd_weight` every 10 epochs by gradient-norm balancing. A weight set to `0.0` stays off. |
+| `adapt_wts` | If `True`, adjusts `phys_weight` and `bnd_weight` every `wt_update_every` epochs (default 10) by gradient-norm balancing, smoothed by `wt_ema` (default 0.1). A weight set to `0.0` stays off. |
 | `theta` | An `nn.Parameter` of trainable physical parameters (activation energies, for example) for inverse problems, optimized alongside the network weights. |
 | `weight_scheme` | Optional callable `(grad_d, grad_p, grad_b) -> (w_phys, w_bnd)` that replaces the built-in adaptive-weight rule. Used only when `adapt_wts=True`. |
 | `grad_aggregator` | Optional callable that combines the per-loss gradients itself, replacing the default weighted-sum update. {class}`~pinnse.PCGrad` is provided. |
 | `log_grad_norms` | If `True`, records the per-epoch gradient norms of the data, physics and boundary losses (`grad_data_hist`, `grad_phys_hist`, `grad_bnd_hist`). Each costs an extra backward pass per batch, so they are computed only on request or when `adapt_wts=True`; otherwise the histories are zeros. |
 | `ckpt_path` | Where the best model (by validation loss) is saved and restored from at the end of training. For inverse problems `theta` is stored alongside and restored with it. Non-finite validation losses never count as improvements, and training raises an error if no checkpoint was written. |
+| `ckpt_metric` | Validation quantity that selects the checkpoint: `"total"` (default; physics and boundary losses weighted by the *initial* weights, so adaptive weighting cannot skew the comparison), `"total_current"` or `"data"`. |
+| `seed` | Seed of the trainer's own generator (validation subsets). Defaults to `torch.initial_seed()`, so `pinnse.seed_everything(seed)` makes a run reproducible. |
+| `val_colloc_frac`, `val_phys_coll_loader`, `val_bnd_coll_loader` | Validation residual losses use a fixed fraction (default 0.25) of the training collocation batches, or held-out collocation loaders when given. |
+| `grad_norm_every` | Compute logged gradient norms on every n-th batch only, to reduce their cost. |
+| `metadata` | JSON-like data (e.g. normalization metrics) stored in every checkpoint and returned by `Analyze.load_checkpoint`. |
+
+### Long runs and reproducibility
+
+Seed every generator once at the top of a script, and let `adam_step` write a
+resumable state so that a job stopped by a time limit can simply be
+resubmitted:
+
+```python
+from pinnse import seed_everything
+
+seed_everything(1234)
+...
+history = training.adam_step(epochs=75000, val_every=100, save_every=500, resume=True)
+```
+
+`save_every=500` writes the model, optimizer, scheduler, loss weights,
+history and random-generator states to `training.last_ckpt_path` every 500
+epochs. With `resume=True`, a rerun of the same script continues from that
+state (or starts from epoch 1 if there is none) and reproduces the run it
+continues exactly. Progress messages are logged to the `"pinnse"` logger and,
+with `verbose=True`, printed; the progress bar is hidden automatically when
+output is redirected to a file, as in batch jobs.
+
+Store the normalization metrics with the model so that evaluation does not
+need the training data:
+
+```python
+training = Training(
+    ..., metadata={"I_S_metrics": I_S_metrics, "D_S_metrics": D_S_metrics}
+)
+...
+ckpt = Analyze.load_checkpoint("logs/best_model.pth", model)  # restores model too
+I_S_metrics = ckpt["metadata"]["I_S_metrics"]
+```
 
 ### Custom loss weighting and gradient aggregation
 
-By default, with `adapt_wts=True`, every 10 epochs each weight moves toward the
-ratio of the data-loss gradient norm to its own loss's gradient norm, smoothed
-by an exponential moving average (factor 0.1). To use a different rule, pass
+By default, with `adapt_wts=True`, every `wt_update_every` epochs (10) each
+weight moves toward the ratio of the data-loss gradient norm to its own loss's
+gradient norm, smoothed by an exponential moving average (factor `wt_ema`,
+0.1). To use a different rule, pass
 `weight_scheme`. It receives the average gradient norms of the data, physics
 and boundary losses over the last epoch, and returns target physics and
 boundary weights, which are smoothed by the same moving average:
@@ -146,7 +187,8 @@ total loss for logging.
 ## Visualization
 
 {class}`~pinnse.Plotter` generates figures from the training-history
-dictionary returned by `Training`.
+dictionary returned by `Training`. Histories from pinnse 1.0 record their
+validation epochs, so `Plotter(history)` needs no `val_every`.
 
 | Method | What it plots |
 |---|---|
