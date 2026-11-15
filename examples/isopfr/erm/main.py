@@ -59,7 +59,7 @@ def main():
         physics_coll_data_size=N_C_P,
         physics_coll_batch_size=B_C_P,
         boundary_coll_data_size=N_C_B,
-        boundry_coll_batch_size=B_C_B,
+        boundary_coll_batch_size=B_C_B,
         test_frac=0.1,
         val_frac=0.1,
     )

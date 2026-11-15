@@ -7,7 +7,7 @@ from pinnse import (
     ANN,
     SANN,
     MultiHeadANN,
-    Fourier_ANN,  # Feedforward architectures
+    FourierANN,  # Feedforward architectures
     RecurrentANN,  # Sequence architecture
     DataModule,
     SequenceDataModule,  # Data loading

@@ -13,6 +13,6 @@ Feedforward and recurrent network architectures. All are ``torch.nn.Module`` sub
 
 .. autoclass:: MultiHeadANN
 
-.. autoclass:: Fourier_ANN
+.. autoclass:: FourierANN
 
 .. autoclass:: RecurrentANN
