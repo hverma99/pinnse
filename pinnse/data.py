@@ -72,6 +72,32 @@ def _make_loader(
     )
 
 
+def _check_labeled_frames(I_S_data: pd.DataFrame, D_S_data: pd.DataFrame) -> None:
+    """Reject labeled data with mismatched rows, non-numeric or non-finite values."""
+    if len(I_S_data) != len(D_S_data):
+        raise ValueError(
+            "I_S_data and D_S_data must have the same number of rows; received "
+            f"{len(I_S_data)} and {len(D_S_data)}."
+        )
+    for name, frame in (("I_S_data", I_S_data), ("D_S_data", D_S_data)):
+        non_numeric = [
+            col
+            for col in frame.columns
+            if not pd.api.types.is_numeric_dtype(frame[col])
+        ]
+        if non_numeric:
+            raise ValueError(f"{name} has non-numeric columns {non_numeric}.")
+        non_finite = [
+            col
+            for col in frame.columns
+            if not np.isfinite(frame[col].to_numpy(dtype=np.float64)).all()
+        ]
+        if non_finite:
+            raise ValueError(
+                f"{name} has missing or non-finite values in columns {non_finite}."
+            )
+
+
 def _require_size(value: Optional[int], name: str) -> int:
     """
     Return a collocation size, rejecting a missing or non-positive value.
@@ -173,6 +199,7 @@ class DataModule:
                 "DataModule(boundry_coll_batch_size=...)", "boundary_coll_batch_size"
             )
             boundary_coll_batch_size = boundry_coll_batch_size
+        _check_labeled_frames(I_S_data, D_S_data)
 
         self.I_S_data = I_S_data
         self.D_S_data = D_S_data
@@ -642,6 +669,13 @@ class SequenceDataModule:
                 f"trajectories and steps; received {I_S_data.shape[:2]} and "
                 f"{D_S_data.shape[:2]}."
             )
+        for name, array in (("I_S_data", I_S_data), ("D_S_data", D_S_data)):
+            if not np.issubdtype(array.dtype, np.number):
+                raise ValueError(
+                    f"{name} must be numeric; received dtype {array.dtype}."
+                )
+            if not np.isfinite(array).all():
+                raise ValueError(f"{name} has missing or non-finite values.")
 
         self.I_S_data = I_S_data
         self.D_S_data = D_S_data
