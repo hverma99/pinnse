@@ -497,6 +497,95 @@ def test_adam_step_rejects_val_every_beyond_epochs_up_front(tmp_path):
     assert not (tmp_path / "best.pth").exists()
 
 
+@pytest.mark.parametrize(
+    "epochs, val_every, match",
+    [
+        (0, 1, "epochs must be a positive integer"),
+        (2.5, 1, "epochs must be a positive integer"),
+        (True, 1, "epochs must be a positive integer"),
+        (2, -1, "val_every must be a positive integer"),
+    ],
+)
+def test_adam_step_validates_epoch_arguments(tmp_path, epochs, val_every, match):
+    with pytest.raises(ValueError, match=match):
+        make_trainer(tmp_path).adam_step(epochs=epochs, val_every=val_every)
+
+
+def test_adam_step_accepts_numpy_integers(tmp_path):
+    np = pytest.importorskip("numpy")
+    h = make_trainer(tmp_path).adam_step(
+        epochs=np.int64(2), val_every=np.int32(1), verbose=False
+    )
+    assert len(h["loss_t"]) == 2
+
+
+def test_adam_step_records_selection_metric_and_best_epoch(tmp_path):
+    t = make_trainer(tmp_path, phys=False, bnd=False)
+    scripted = iter([(3.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)])
+    t.validate_test = lambda loader: (
+        (0.0, 0.0, 0.0) if loader is t.test_loader else next(scripted)
+    )
+    h = t.adam_step(epochs=3, val_every=1, verbose=False)
+    assert h["val_metric"] == [3.0, 1.0, 2.0]
+    assert h["best_epoch"] == t.best_epoch == 2
+
+
+def test_ckpt_metric_must_be_known(tmp_path):
+    with pytest.raises(ValueError, match="ckpt_metric must be one of"):
+        make_trainer(tmp_path, ckpt_metric="val_loss")
+
+
+@pytest.mark.parametrize(
+    "ckpt_metric, expected",
+    [
+        ("total", 1.0 + 1.0 * 2.0 + 1.0 * 3.0),  # reference (initial) weights
+        ("total_current", 1.0 + 4.0 * 2.0 + 5.0 * 3.0),  # weights at that epoch
+        ("data", 1.0),
+    ],
+)
+def test_selection_metric_variants(tmp_path, ckpt_metric, expected):
+    t = make_trainer(tmp_path, ckpt_metric=ckpt_metric)
+    t.phys_weight, t.bnd_weight = 4.0, 5.0  # as if adapted
+    assert t._selection_metric(1.0, 2.0, 3.0) == pytest.approx(expected)
+
+
+def test_validation_collocation_subset_is_fixed_and_seeded(tmp_path):
+    coll = loader(torch.rand(64, 1), batch_size=4)  # 16 batches
+
+    def evaluated(trainer):
+        trainer.phys_residual.calls.clear()
+        seen = []
+        real = trainer.phys_residual.fn
+        trainer.phys_residual.fn = lambda x, y: seen.append(x.detach()) or real(x, y)
+        trainer.validate_test(trainer.val_loader)
+        trainer.phys_residual.fn = real
+        return seen
+
+    t = make_trainer(tmp_path, phys_coll_loader=coll, seed=123)
+    first, second = evaluated(t), evaluated(t)
+    assert len(first) == 4  # 25% of 16 batches
+    assert all(torch.equal(a, b) for a, b in zip(first, second))
+
+    same_seed = evaluated(make_trainer(tmp_path, phys_coll_loader=coll, seed=123))
+    assert all(torch.equal(a, b) for a, b in zip(first, same_seed))
+
+
+def test_trainer_seed_defaults_to_torch_initial_seed(tmp_path):
+    torch.manual_seed(77)
+    t = Training(
+        model=ANN([1, 4, 1], nn.Tanh),
+        train_loader=labeled(8),
+        val_loader=labeled(8),
+        test_loader=labeled(8),
+        optimizer=None,
+        loss_fn=nn.MSELoss(),
+        device=torch.device("cpu"),
+        ckpt_path=str(tmp_path / "x.pth"),
+    )
+    assert t.seed == 77
+    assert make_trainer(tmp_path, seed=5).seed == 5
+
+
 def test_adam_step_ignores_non_finite_validation_losses(tmp_path):
     t = make_trainer(tmp_path, phys=False, bnd=False)
     nan = float("nan")

@@ -152,6 +152,8 @@ class Training(object):
         grad_aggregator: Optional[Callable] = None,
         weight_scheme: Optional[Callable] = None,
         log_grad_norms: bool = False,
+        seed: Optional[int] = None,
+        ckpt_metric: str = "total",
     ):
         """
         Inputs
@@ -163,7 +165,28 @@ class Training(object):
             batch, so they are computed only when requested here or when
             `adapt_wts=True`, which needs them; otherwise the histories are
             recorded as zeros.
+
+        seed : int, optional, default=None
+            Seed of the random generator owned by this trainer, which selects
+            the collocation batches evaluated during validation. If None, it is
+            taken from `torch.initial_seed()`, so a run seeded with
+            `torch.manual_seed` (or `pinnse.seed_everything`) is reproducible.
+
+        ckpt_metric : str, optional, default="total"
+            Validation quantity used to select the best checkpoint and to step
+            a `ReduceLROnPlateau` scheduler:
+
+            - ``"total"``: data loss plus the physics and boundary losses
+              weighted by the *initial* weights. With adaptive weights this
+              keeps every validation epoch on the same scale.
+            - ``"total_current"``: as above, but with the weights current at
+              that epoch (the behaviour of pinnse < 1.0).
+            - ``"data"``: validation data loss only.
         """
+        if ckpt_metric not in CKPT_METRICS:
+            raise ValueError(
+                f"ckpt_metric must be one of {CKPT_METRICS}; received {ckpt_metric!r}."
+            )
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -184,6 +207,16 @@ class Training(object):
         self.grad_aggregator = grad_aggregator
         self.weight_scheme = weight_scheme
         self.log_grad_norms = bool(log_grad_norms or adapt_wts)
+        self.ckpt_metric = ckpt_metric
+        self.seed = seed if seed is not None else torch.initial_seed()
+        self._rng = random.Random(self.seed)
+        self._val_subsets: dict = {}
+
+        # Reference weights of the "total" checkpoint metric; the working
+        # weights below may be changed by the adaptive weighting.
+        self.ref_phys_weight = phys_weight
+        self.ref_bnd_weight = bnd_weight
+        self.best_epoch: Optional[int] = None
 
         os.makedirs(os.path.dirname(self.ckpt_path) or ".", exist_ok=True)
 
@@ -352,6 +385,31 @@ class Training(object):
             "avg_grad_b": avg_grad_b,
         }
 
+    def _colloc_subset(self, batches: list, kind: str, frac: float) -> list:
+        """
+        Return the collocation batches evaluated during validation and testing.
+
+        A fraction `frac` of the batches (at least one) is drawn once, with
+        the trainer's own seeded generator, and reused at every later call, so
+        that successive validation losses are computed on the same points and
+        are comparable, and so that the selection is reproducible.
+        """
+        n_total = len(batches)
+        frac = max(0.0, min(1.0, float(frac)))
+        n_sample = max(1, min(n_total, int(round(n_total * frac))))
+        key = (kind, n_sample)
+        if key not in self._val_subsets:
+            self._val_subsets[key] = sorted(self._rng.sample(range(n_total), n_sample))
+        return [batches[i] for i in self._val_subsets[key]]
+
+    def _selection_metric(self, data: float, phys: float, bnd: float) -> float:
+        """Validation quantity used for checkpoint selection (see `ckpt_metric`)."""
+        if self.ckpt_metric == "data":
+            return data
+        if self.ckpt_metric == "total_current":
+            return data + self.phys_weight * phys + self.bnd_weight * bnd
+        return data + self.ref_phys_weight * phys + self.ref_bnd_weight * bnd
+
     def validate_test(
         self,
         loader: torch.utils.data.DataLoader,
@@ -373,18 +431,13 @@ class Training(object):
         avg_data = tot_data_loss / n_data if n_data else 0.0
 
         tot_phys_loss, n_phys = 0.0, 0
-        n_phys_coll_total = len(self.all_phys_colloc_batches)
-        phys_frac = max(0.0, min(1.0, float(phys_colloc_frac)))
-        n_sample = max(
-            1, min(n_phys_coll_total, int(round(n_phys_coll_total * phys_frac)))
-        )
         if (
             self.phys_weight != 0
             and self.phys_residual is not None
             and len(self.all_phys_colloc_batches) > 0
         ):
-            sampled_phys_coll_batches = random.sample(
-                self.all_phys_colloc_batches, n_sample
+            sampled_phys_coll_batches = self._colloc_subset(
+                self.all_phys_colloc_batches, "physics", phys_colloc_frac
             )
 
             for x_phys_batch in sampled_phys_coll_batches:
@@ -398,18 +451,13 @@ class Training(object):
         avg_phys = tot_phys_loss / n_phys if n_phys else 0.0
 
         tot_bnd_loss, n_bnd = 0.0, 0
-        n_bnd_coll_total = len(self.all_bnd_colloc_batches)
-        bnd_frac = max(0.0, min(1.0, float(bnd_colloc_frac)))
-        n_sample = max(
-            1, min(n_bnd_coll_total, int(round(n_bnd_coll_total * bnd_frac)))
-        )
         if (
             self.bnd_weight != 0
             and self.bnd_residual is not None
             and len(self.all_bnd_colloc_batches) > 0
         ):
-            sampled_bnd_coll_batches = random.sample(
-                self.all_bnd_colloc_batches, n_sample
+            sampled_bnd_coll_batches = self._colloc_subset(
+                self.all_bnd_colloc_batches, "boundary", bnd_colloc_frac
             )
             for x_bnd_batch in sampled_bnd_coll_batches:
                 x_bnd = x_bnd_batch.to(self.device).requires_grad_(True)
@@ -434,8 +482,10 @@ class Training(object):
 
         best_total = float("inf")
         ckpt_saved = False
+        self.best_epoch = None
         loss_t, loss_d, loss_p, loss_b = [], [], [], []
         val_loss_t, val_loss_d, val_loss_p, val_loss_b = [], [], [], []
+        val_metric = []
         wt_phys, wt_bnd = [], []
         inv_param = []
 
@@ -524,13 +574,18 @@ class Training(object):
                         f"\tBoundary Loss: {val_bnd:.2e}"
                         f"\033[0m"
                     )
-                # A non-finite loss never counts as an improvement, so a run
+                # The checkpoint is selected on a quantity whose scale does not
+                # change with the adaptive weights (see `ckpt_metric`). A
+                # non-finite value never counts as an improvement, so a run
                 # that diverges does not overwrite, or later reload, a usable
                 # checkpoint.
-                if math.isfinite(val_total) and val_total < best_total:
-                    best_total = val_total
+                metric = self._selection_metric(val_data, val_phys, val_bnd)
+                val_metric.append(metric)
+                if math.isfinite(metric) and metric < best_total:
+                    best_total = metric
                     self._save_checkpoint()
                     ckpt_saved = True
+                    self.best_epoch = epoch
 
                 if self.theta is not None:
                     inv_param.append(self.theta.detach().cpu().numpy().copy())
@@ -538,7 +593,7 @@ class Training(object):
                 if self.scheduler is not None and isinstance(
                     self.scheduler, ReduceLROnPlateau
                 ):
-                    self.scheduler.step(val_total)
+                    self.scheduler.step(metric)
 
             if self.scheduler is not None and not isinstance(
                 self.scheduler, ReduceLROnPlateau
@@ -548,10 +603,9 @@ class Training(object):
 
         if not ckpt_saved:
             raise RuntimeError(
-                "No checkpoint was written during training: either no validation "
-                "epoch was reached (epochs < val_every) or every validation loss "
-                "was non-finite. The model has not been restored from "
-                f"{self.ckpt_path!r}."
+                "No checkpoint was written during training: every validation "
+                f"{self.ckpt_metric!r} loss was non-finite. The model has not been "
+                f"restored from {self.ckpt_path!r}."
             )
         self._load_checkpoint()
         test_data, test_phys, test_bnd = self.validate_test(loader=self.test_loader)
@@ -573,6 +627,8 @@ class Training(object):
             "val_loss_d": val_loss_d,
             "val_loss_p": val_loss_p,
             "val_loss_b": val_loss_b,
+            "val_metric": val_metric,
+            "best_epoch": self.best_epoch,
             "wt_phys": wt_phys,
             "wt_bnd": wt_bnd,
             "grad_data_hist": self.grad_data_hist,

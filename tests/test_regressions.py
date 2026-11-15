@@ -3,6 +3,8 @@ Regression tests for the bugs fixed in pinnse 1.0, one test per bug ID of the
 1.0 audit. Each test fails on pinnse 0.2.1 and passes once its bug is fixed.
 """
 
+import random
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -43,6 +45,44 @@ def _trainer(tmp_path, **kw):
     )
     args.update(kw)
     return Training(**args)
+
+
+# ----------------------------------- B01 -------------------------------------
+def test_B01_checkpoint_selection_not_skewed_by_adapted_weights(tmp_path):
+    # The physics residual is the same for every model, so it cannot change
+    # which model is best; only its weight grows. The restored checkpoint must
+    # therefore be the epoch with the lowest validation data loss.
+    t = _trainer(
+        tmp_path,
+        phys_coll_loader=_loader(torch.rand(16, 1)),
+        phys_residual=lambda x, y: 0.0 * y + 1.0,
+        phys_weight=1.0,
+        adapt_wts=True,
+        weight_scheme=lambda gd, gp, gb: (100.0, None),
+    )
+    t.wt_update_every = 1
+    h = t.adam_step(epochs=60, val_every=5, verbose=False)
+
+    assert h["wt_phys"][-1] > 50.0  # the weight did drift
+    restored = t.validate_test(t.val_loader)[0]
+    assert restored == pytest.approx(min(h["val_loss_d"]), rel=1e-6)
+
+
+# ----------------------------------- B02 -------------------------------------
+def test_B02_validation_sampling_reproducible_under_torch_seed(tmp_path):
+    def run(python_seed):
+        random.seed(python_seed)  # state of Python's global generator
+        torch.manual_seed(0)
+        coll = _loader(torch.rand(128, 1) * 2 - 1, batch_size=8)
+        t = _trainer(
+            tmp_path,
+            phys_coll_loader=coll,
+            phys_residual=_phys,
+            phys_weight=1.0,
+        )
+        return t.adam_step(epochs=4, val_every=1, verbose=False)["val_loss_p"]
+
+    assert run(1) == run(2)
 
 
 # ----------------------------------- B07 -------------------------------------
