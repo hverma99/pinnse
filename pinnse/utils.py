@@ -717,6 +717,31 @@ class Analyze:
         return pd.DataFrame(rows)
 
 
+def _history_frames(history: dict):
+    """
+    Yield `(key, DataFrame)` for every non-None item of a training history.
+
+    One-dimensional items become a single column, two-dimensional items (e.g.
+    the inverse-parameter history) one column per component, and anything
+    else a single object column.
+    """
+    for key, value in history.items():
+        if value is None:
+            continue
+        arr = np.asarray(value)
+        if arr.ndim == 1:
+            yield key, pd.DataFrame({key: value})
+        elif arr.ndim == 2:
+            yield (
+                key,
+                pd.DataFrame(
+                    arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
+                ),
+            )
+        else:
+            yield key, pd.DataFrame({key: pd.Series(value, dtype=object)})
+
+
 class Save:
     @staticmethod
     def excel(
@@ -743,19 +768,7 @@ class Save:
         filepath = os.path.join(foldername, filename)
 
         with pd.ExcelWriter(filepath) as writer:
-            for key, value in history.items():
-                if value is None:
-                    continue
-                arr = np.asarray(value)
-                if arr.ndim == 1:
-                    df = pd.DataFrame({key: value})
-                elif arr.ndim == 2:
-                    df = pd.DataFrame(
-                        arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
-                    )
-                else:
-                    df = pd.DataFrame({key: pd.Series(value, dtype=object)})
-
+            for key, df in _history_frames(history):
                 df.to_excel(writer, sheet_name=key[:31], index=False)
         print(f"Saved training history XLSX files to folder: {filepath}")
 
@@ -780,21 +793,7 @@ class Save:
         """
         foldername = os.path.join(foldername, filename)
         os.makedirs(foldername, exist_ok=True)
-        for key, value in history.items():
-            if value is None:
-                continue
-
-            arr = np.asarray(value)
-
-            if arr.ndim == 1:
-                df = pd.DataFrame({key: value})
-            elif arr.ndim == 2:
-                df = pd.DataFrame(
-                    arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
-                )
-            else:
-                df = pd.DataFrame({key: pd.Series(value, dtype=object)})
-
+        for key, df in _history_frames(history):
             df.to_csv(os.path.join(foldername, f"{key}.csv"), index=False)
 
         print(f"Saved training history CSV files to folder: {foldername}")
