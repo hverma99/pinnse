@@ -424,6 +424,13 @@ class Training(object):
         return avg_data, avg_phys, avg_bnd
 
     def adam_step(self, epochs: int, val_every: int, verbose: bool = True):
+        epochs = _require_positive_int(epochs, "epochs")
+        val_every = _require_positive_int(val_every, "val_every")
+        if val_every > epochs:
+            raise ValueError(
+                f"val_every={val_every} exceeds epochs={epochs}: no validation "
+                "epoch would be reached, so no checkpoint could be selected."
+            )
 
         best_total = float("inf")
         ckpt_saved = False
@@ -605,6 +612,26 @@ class Training(object):
         valid_modes = ("data", "physics", "boundary", "combined", "overall physics")
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of: {valid_modes}")
+
+        # Refuse a mode whose objective is identically zero, which LBFGS would
+        # otherwise "optimize" silently without changing any parameter.
+        active = {
+            "data": mode in ("data", "combined"),
+            "physics": mode in ("physics", "combined", "overall physics")
+            and len(self.all_phys_colloc_batches) > 0
+            and self.phys_residual is not None
+            and self.phys_weight != 0,
+            "boundary": mode in ("boundary", "combined", "overall physics")
+            and len(self.all_bnd_colloc_batches) > 0
+            and self.bnd_residual is not None
+            and self.bnd_weight != 0,
+        }
+        if not any(active.values()):
+            raise ValueError(
+                f"lbfgs_step(mode={mode!r}) has no active loss term: the "
+                "physics/boundary terms need a residual, collocation data and "
+                "a non-zero weight."
+            )
 
         def gather_full_data(loader):
             X, Y = [], []

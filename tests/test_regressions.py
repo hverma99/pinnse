@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+import pytest
+
 import pinnse.train
 from pinnse import ANN, Training
 
@@ -41,6 +43,27 @@ def _trainer(tmp_path, **kw):
     )
     args.update(kw)
     return Training(**args)
+
+
+# ----------------------------------- B07 -------------------------------------
+def test_B07_adam_step_rejects_bad_epochs_before_training(tmp_path, monkeypatch):
+    t = _trainer(tmp_path)
+    monkeypatch.setattr(t, "train_epoch", lambda: pytest.fail("trained anyway"))
+    with pytest.raises(ValueError, match="exceeds epochs"):
+        t.adam_step(epochs=3, val_every=5, verbose=False)
+    with pytest.raises(ValueError, match="val_every must be a positive integer"):
+        t.adam_step(epochs=3, val_every=0, verbose=False)
+
+
+# ----------------------------------- B08 -------------------------------------
+def test_B08_lbfgs_rejects_mode_without_active_term(tmp_path):
+    t = _trainer(tmp_path)  # no physics residual, no collocation data
+    t._save_checkpoint()
+    before = [p.detach().clone() for p in t.model.parameters()]
+    with pytest.raises(ValueError, match="no active loss term"):
+        t.lbfgs_step(mode="physics", N_LBFGS=2, verbose=False)
+    for a, b in zip(before, t.model.parameters()):
+        assert torch.equal(a, b)
 
 
 # ----------------------------------- B13 -------------------------------------

@@ -490,9 +490,9 @@ def test_default_adaptive_weights_with_single_residual(tmp_path):
     assert h["wt_bnd"][0] != 1.0 and h["wt_bnd"][1] != h["wt_bnd"][0]
 
 
-def test_adam_step_raises_when_no_validation_epoch_is_reached(tmp_path):
+def test_adam_step_rejects_val_every_beyond_epochs_up_front(tmp_path):
     t = make_trainer(tmp_path, phys=False, bnd=False)
-    with pytest.raises(RuntimeError, match="No checkpoint was written"):
+    with pytest.raises(ValueError, match="exceeds epochs"):
         t.adam_step(epochs=1, val_every=2, verbose=False)
     assert not (tmp_path / "best.pth").exists()
 
@@ -658,14 +658,35 @@ def test_lbfgs_optimizes_and_restores_inverse_parameter(tmp_path):
     torch.testing.assert_close(torch.load(t.ckpt_path)["theta"], theta.detach())
 
 
-def test_lbfgs_without_collocation_data(tmp_path):
+@pytest.mark.parametrize(
+    "mode, kw",
+    [
+        ("overall physics", dict(phys=False, bnd=False)),  # no collocation data
+        ("physics", dict(phys_weight=0.0)),  # disabled by its weight
+        ("boundary", dict(bnd_residual=None)),  # no residual
+    ],
+)
+def test_lbfgs_rejects_mode_without_active_term(tmp_path, mode, kw):
+    kw = {"phys_weight": 1.0, "bnd_weight": 1.0, **kw}
+    t = make_trainer(tmp_path, **kw)
+    with pytest.raises(ValueError, match="no active loss term"):
+        t.lbfgs_step(mode=mode, N_LBFGS=2, verbose=False)
+
+
+def test_lbfgs_non_finite_steps_keep_the_previous_checkpoint(tmp_path):
+    t = make_trainer(tmp_path, bnd=False, phys_residual=lambda x, y: y * float("nan"))
+    t._save_checkpoint()
+    saved = copy.deepcopy(t.model.state_dict())
+    h = t.lbfgs_step(mode="physics", N_LBFGS=2, verbose=False)
+    assert all(math.isnan(v) for v in h["loss_t"])
+    for k, v in t.model.state_dict().items():
+        torch.testing.assert_close(v, saved[k])
+
+
+def test_lbfgs_combined_without_collocation_data_uses_data_loss(tmp_path):
     t = make_trainer(tmp_path, phys=False, bnd=False, phys_weight=1.0, bnd_weight=1.0)
     torch.save({"model_state_dict": t.model.state_dict()}, t.ckpt_path)
-    h = t.lbfgs_step(mode="overall physics", N_LBFGS=2, verbose=False)
-    assert h == {
-        "loss_t": [0.0, 0.0],
-        "loss_d": [0.0, 0.0],
-        "loss_p": [0.0, 0.0],
-        "loss_b": [0.0, 0.0],
-    }
+    h = t.lbfgs_step(mode="combined", N_LBFGS=2, verbose=False)
+    assert all(v > 0 for v in h["loss_d"])
+    assert h["loss_p"] == [0.0, 0.0] and h["loss_b"] == [0.0, 0.0]
     assert t.X_phys_all is None and t.X_bnd_all is None
