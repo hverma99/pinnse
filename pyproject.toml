@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinnse"
-version = "0.2.1"
+version = "1.0.0"
 description = "A modular PyTorch framework for developing physics-informed neural network surrogate models for chemical process modeling, simulation, and process systems engineering."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 keywords = [
@@ -20,7 +20,7 @@ keywords = [
     "surrogate modeling",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering",
@@ -28,12 +28,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Chemistry",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-
 ]
 authors = [
     { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
@@ -42,15 +40,17 @@ maintainers = [
     { name = "Harshit Verma", email = "harshit.verma.che@gmail.com" }
 ]
 
+# Minimum versions: the oldest releases supporting Python 3.11, unless a
+# feature needs a newer one (noted).
 dependencies = [
-    "numpy",
+    "numpy>=1.24",
     "scipy>=1.15",        # qmc samplers take an ``rng`` argument
     "torch>=2.0",         # torch.optim.lr_scheduler.LRScheduler
-    "pandas",
-    "tqdm",
-    "scikit-learn",
+    "pandas>=2.0",
+    "tqdm>=4.65",
+    "scikit-learn>=1.2",
     "matplotlib>=3.8",    # Axes.tick_params(labelfontfamily=...)
-    "openpyxl"
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +74,7 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/hverma99/pinnse"
 Repository = "https://github.com/hverma99/pinnse"
+Changelog = "https://github.com/hverma99/pinnse/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
