@@ -207,9 +207,93 @@ def test_bnd_colloc_fixes_last_column(module):
 def test_bnd_colloc_default_value_and_options(module):
     dm, _ = module
     loader = dm.bnd_colloc_loader(shuffle=False, drop_last=True)
-    np.testing.assert_array_equal(gather(loader)[:, -1], -1.0)
+    # the default boundary is the smallest value of the boundary column
+    np.testing.assert_array_equal(gather(loader)[:, -1], dm.lower_bnd[-1])
     assert isinstance(loader.sampler, SequentialSampler)
     assert loader.drop_last
+
+
+def test_bnd_colloc_warns_for_value_outside_the_data(module):
+    dm, _ = module
+    with pytest.warns(UserWarning, match="lies outside the range"):
+        dm.bnd_colloc_loader(bnd_value=-5.0)
+
+
+# ------------------------------- simplex groups ------------------------------
+def test_simplex_groups_detected_from_prefixes(module):
+    dm, _ = module
+    assert dm.simplex_groups == [["Z_A", "Z_B"]]
+
+
+def test_explicit_simplex_groups_and_disabling_them(tabular_data):
+    I_S, D_S = tabular_data
+    dm = DataModule(I_S, D_S, 8, 64, 16, simplex_groups=[["Z_B", "Z_A"]])
+    X = gather(dm.phys_colloc_loader())
+    np.testing.assert_allclose(X[:, 2] + X[:, 3], 1.0, rtol=1e-5)
+
+    dm = DataModule(I_S, D_S, 8, 64, 16, simplex_groups=[])
+    assert dm.simplex_groups == []
+    X = gather(dm.phys_colloc_loader())
+    assert not np.allclose(X[:, 2] + X[:, 3], 1.0)  # Latin hypercube instead
+    assert np.all(X[:, 2:4] >= dm.lower_bnd[2:4] - 1e-6)
+    assert np.all(X[:, 2:4] <= dm.upper_bnd[2:4] + 1e-6)
+
+
+@pytest.mark.parametrize(
+    "groups, problem",
+    [
+        ([["Z_A", "Z_Q"]], "unknown input columns"),
+        ([["Z_A"]], "at least two columns"),
+        ([["Z_A", "Z_B"], ["Z_B", "Z_A"]], "already belong to another group"),
+        ([["P", "T"]], "do not sum to one"),
+    ],
+)
+def test_explicit_invalid_simplex_groups_raise(tabular_data, groups, problem):
+    I_S, D_S = tabular_data
+    with pytest.raises(ValueError, match=problem):
+        DataModule(I_S, D_S, 8, simplex_groups=groups)
+
+
+def test_detected_group_with_one_column_is_sampled_in_its_bounds(tabular_data):
+    I_S, D_S = tabular_data
+    I_S = I_S.assign(X_conv=np.linspace(0.2, 0.9, len(I_S)))
+    with pytest.warns(UserWarning, match="at least two columns"):
+        dm = DataModule(I_S, D_S, 8, 64, 16)
+    assert dm.simplex_groups == [["Z_A", "Z_B"]]
+    x = gather(dm.phys_colloc_loader())[:, -1]
+    assert x.min() >= 0.2 - 1e-6 and x.max() <= 0.9 + 1e-6 and np.unique(x).size > 1
+
+
+# -------------------------------- shuffle seed -------------------------------
+def test_shuffle_seed_makes_batch_order_independent_of_global_rng(tabular_data):
+    I_S, D_S = tabular_data
+
+    def first_batches(global_seed):
+        torch.manual_seed(global_seed)
+        dm = DataModule(I_S, D_S, 8, 32, 8, 16, 8, shuffle_seed=3)
+        loaders = (
+            dm.labeled_data_loader()[0],
+            dm.phys_colloc_loader(),
+            dm.bnd_colloc_loader(),
+        )
+        return [next(iter(dl))[0] for dl in loaders]
+
+    for a, b in zip(first_batches(0), first_batches(1)):
+        torch.testing.assert_close(a, b)
+
+
+def test_without_shuffle_seed_loaders_use_the_global_rng(module):
+    dm, (train, val, _) = module
+    assert train.generator is None and val.generator is None
+    assert dm.phys_colloc_loader().generator is None
+
+
+def test_split_fractions_default_to_a_quarter(tabular_data):
+    I_S, D_S = tabular_data
+    for kw in ({}, {"test_frac": None, "val_frac": None}):
+        dm = DataModule(I_S, D_S, 8, **kw)
+        assert (dm.test_frac, dm.val_frac) == (0.25, 0.25)
+        assert [len(dl.dataset) for dl in dm.labeled_data_loader()] == [56, 19, 25]
 
 
 # ------------------------------ inspect / save -------------------------------
@@ -281,6 +365,24 @@ def make_sequences(n_traj=20, seq_len=10, seed=0):
     X[:, :, 2] = np.linspace(0, 1, seq_len)
     Y = np.cumsum(X[:, :, :2], axis=1)
     return X, Y
+
+
+@pytest.mark.parametrize("n_segments", [0, -1, 2.5, True])
+def test_sequence_module_rejects_bad_n_segments(n_segments):
+    X, Y = make_sequences()
+    with pytest.raises(ValueError, match="n_segments must be a positive integer"):
+        SequenceDataModule(X, Y, 4, n_segments=n_segments)
+
+
+def test_sequence_module_shuffle_seed_and_default_fractions():
+    X, Y = make_sequences()
+    sdm = SequenceDataModule(
+        X, Y, 4, physics_coll_data_size=8, physics_coll_batch_size=4, shuffle_seed=1
+    )
+    assert (sdm.test_frac, sdm.val_frac) == (0.25, 0.25)
+    assert sdm.labeled_data_loader()[0].generator is not None
+    assert sdm.phys_colloc_loader().generator is not None
+    assert sdm.labeled_data_loader()[1].generator is None
 
 
 def test_sequence_module_rejects_bad_shapes():

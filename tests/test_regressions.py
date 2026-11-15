@@ -9,10 +9,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+import numpy as np
+import pandas as pd
 import pytest
 
 import pinnse.train
-from pinnse import ANN, Training
+from pinnse import ANN, DataModule, Normalization, SequenceDataModule, Training
 
 
 def _loader(X, Y=None, batch_size=8):
@@ -85,6 +87,48 @@ def test_B02_validation_sampling_reproducible_under_torch_seed(tmp_path):
     assert run(1) == run(2)
 
 
+# ----------------------------------- B03 -------------------------------------
+def test_B03_compositions_only_dirichlet_sampled_when_they_sum_to_one():
+    rng = np.random.default_rng(0)
+    z = rng.dirichlet([2, 3, 5], 300)
+    I_S = pd.DataFrame(
+        {
+            "T": rng.uniform(300, 400, 300),
+            "Z_A": z[:, 0],
+            "Z_B": z[:, 1],
+            "Z_C": z[:, 2],
+        }
+    )
+    D_S = pd.DataFrame({"y": I_S["T"] * I_S["Z_A"]})
+
+    # (a) normalized mole fractions no longer sum to one: sampling them on the
+    # simplex gave physically impossible compositions once denormalized
+    norm_I_S, _ = Normalization.min_max(I_S)
+    with pytest.warns(UserWarning, match="do not sum to one"):
+        dm = DataModule(norm_I_S, D_S, 50, 500, 100)
+    X = dm.phys_colloc_loader().dataset.tensors[0].numpy()
+    assert not np.allclose(X[:, 1:].sum(axis=1), 1.0)
+
+    # (b) a lone prefixed column used to be "sampled" as the constant 1.0
+    I_S1 = pd.DataFrame({"X_conv": rng.uniform(0.2, 0.9, 300), "T": I_S["T"]})
+    with pytest.warns(UserWarning):
+        dm = DataModule(I_S1, D_S, 50, 500, 100)
+    x = dm.phys_colloc_loader().dataset.tensors[0].numpy()[:, 0]
+    assert np.unique(x).size > 1 and x.min() >= 0.2 - 1e-6
+
+
+# ----------------------------------- B06 -------------------------------------
+def test_B06_default_boundary_value_lies_in_the_data_domain():
+    I_S = pd.DataFrame({"x": np.linspace(0, 1, 50), "V": np.linspace(0, 10, 50)})
+    D_S = pd.DataFrame({"y": np.linspace(0, 1, 50)})
+    norm_I_S, _ = Normalization.min_max(I_S)  # V scaled to [0, 1]
+    dm = DataModule(
+        norm_I_S, D_S, 10, boundary_coll_data_size=8, boundry_coll_batch_size=8
+    )
+    X = dm.bnd_colloc_loader(shuffle=False).dataset.tensors[0].numpy()
+    assert np.all(X[:, -1] == 0.0)
+
+
 # ----------------------------------- B07 -------------------------------------
 def test_B07_adam_step_rejects_bad_epochs_before_training(tmp_path, monkeypatch):
     t = _trainer(tmp_path)
@@ -104,6 +148,23 @@ def test_B08_lbfgs_rejects_mode_without_active_term(tmp_path):
         t.lbfgs_step(mode="physics", N_LBFGS=2, verbose=False)
     for a, b in zip(before, t.model.parameters()):
         assert torch.equal(a, b)
+
+
+# ----------------------------------- B10 -------------------------------------
+def test_B10_default_split_fractions_are_explicit(tabular_data):
+    I_S, D_S = tabular_data
+    dm = DataModule(I_S, D_S, 8)
+    assert (dm.test_frac, dm.val_frac) == (0.25, 0.25)
+    X = np.zeros((10, 5, 2))
+    sdm = SequenceDataModule(X, X, 2)
+    assert (sdm.test_frac, sdm.val_frac) == (0.25, 0.25)
+
+
+# ----------------------------------- B12 -------------------------------------
+def test_B12_sequence_n_segments_validated_at_construction():
+    X = np.zeros((10, 5, 2))
+    with pytest.raises(ValueError, match="n_segments must be a positive integer"):
+        SequenceDataModule(X, X, 2, n_segments=0, test_frac=0.2, val_frac=0.2)
 
 
 # ----------------------------------- B13 -------------------------------------
