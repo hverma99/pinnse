@@ -13,8 +13,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import pinnse.PINNs
 import pinnse.train
-from pinnse import ANN, DataModule, Normalization, SequenceDataModule, Training
+from pinnse import (
+    ANN,
+    DataModule,
+    MultiHeadANN,
+    Normalization,
+    SequenceDataModule,
+    Training,
+)
 
 
 def _loader(X, Y=None, batch_size=8):
@@ -117,6 +125,17 @@ def test_B03_compositions_only_dirichlet_sampled_when_they_sum_to_one():
     assert np.unique(x).size > 1 and x.min() >= 0.2 - 1e-6
 
 
+# ----------------------------------- B05 -------------------------------------
+def test_B05_multihead_model_trains_with_training(tmp_path):
+    torch.manual_seed(0)
+    model = MultiHeadANN(1, [8], {"y": 1}, nn.Tanh)
+    t = _trainer(
+        tmp_path, model=model, optimizer=torch.optim.Adam(model.parameters(), 1e-2)
+    )
+    h = t.adam_step(epochs=2, val_every=1, verbose=False)
+    assert len(h["loss_d"]) == 2
+
+
 # ----------------------------------- B06 -------------------------------------
 def test_B06_default_boundary_value_lies_in_the_data_domain():
     I_S = pd.DataFrame({"x": np.linspace(0, 1, 50), "V": np.linspace(0, 10, 50)})
@@ -167,9 +186,22 @@ def test_B12_sequence_n_segments_validated_at_construction():
         SequenceDataModule(X, X, 2, n_segments=0, test_frac=0.2, val_frac=0.2)
 
 
+# ----------------------------------- B12 -------------------------------------
+def test_B12_models_reject_degenerate_layer_specifications():
+    with pytest.raises(ValueError, match="layer_size"):
+        ANN([3], activation=nn.Tanh)
+    with pytest.raises(ValueError, match="trunk_layers"):
+        MultiHeadANN(2, [], {"a": 1}, nn.Tanh)
+
+
 # ----------------------------------- B13 -------------------------------------
 def test_B13_train_module_docstring():
     assert pinnse.train.__doc__ and "Training module" in pinnse.train.__doc__
+
+
+def test_B13_models_module_docstring_lists_every_model():
+    doc = pinnse.PINNs.__doc__
+    assert doc and all(n in doc for n in ("ANN", "SANN", "MultiHeadANN"))
 
 
 # ----------------------------------- B14 -------------------------------------

@@ -71,6 +71,7 @@ def test_multihead_returns_one_output_per_head():
         trunk_layers=[16, 8],
         head_dims={"flow": 4, "temp": 1},
         activation=nn.Tanh,
+        return_dict=True,
     )
     out = model(torch.randn(7, 3))
 
@@ -84,13 +85,43 @@ def test_multihead_returns_one_output_per_head():
 
 def test_multihead_trunk_is_shared_and_heads_are_independent():
     model = MultiHeadANN(
-        in_dim=2, trunk_layers=[8], head_dims={"a": 1, "b": 1}, activation=nn.Tanh
+        in_dim=2,
+        trunk_layers=[8],
+        head_dims={"a": 1, "b": 1},
+        activation=nn.Tanh,
+        return_dict=True,
     )
     model(torch.randn(5, 2))["a"].sum().backward()
 
     assert model.trunk[0].weight.grad is not None
     assert model.heads["a"][0].weight.grad is not None
     assert model.heads["b"][0].weight.grad is None
+
+
+def test_multihead_concatenates_heads_in_order_by_default():
+    model = MultiHeadANN(3, [8], {"flow": 4, "temp": 1}, nn.Tanh)
+    x = torch.randn(6, 3)
+    out = model(x)
+    assert out.shape == (6, 5)
+    model.return_dict = True
+    parts = model(x)
+    torch.testing.assert_close(out, torch.cat([parts["flow"], parts["temp"]], dim=1))
+
+
+@pytest.mark.parametrize(
+    "trunk, heads, match",
+    [([], {"a": 1}, "trunk_layers"), ([8], {}, "head_dims")],
+)
+def test_multihead_rejects_empty_trunk_or_heads(trunk, heads, match):
+    with pytest.raises(ValueError, match=match):
+        MultiHeadANN(2, trunk, heads, nn.Tanh)
+
+
+@pytest.mark.parametrize("cls", [ANN, SANN, Fourier_ANN])
+@pytest.mark.parametrize("layer_size", [[3], [], [3, 0, 1], [3, 2.5, 1], [True, 4]])
+def test_feedforward_models_reject_bad_layer_sizes(cls, layer_size):
+    with pytest.raises(ValueError, match="layer_size must list"):
+        cls(layer_size, activation=nn.Tanh)
 
 
 # -------------------------------- Fourier_ANN --------------------------------

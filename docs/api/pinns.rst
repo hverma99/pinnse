@@ -5,7 +5,7 @@ Network architectures
 
 .. currentmodule:: pinnse
 
-Feedforward and recurrent network architectures. All are ``torch.nn.Module`` subclasses with a single-tensor forward pass, so any of them can be passed to :class:`~pinnse.Training`.
+Feedforward and recurrent network architectures. All are ``torch.nn.Module`` subclasses with a single-tensor forward pass, so any of them can be passed to :class:`~pinnse.Training`. :class:`~pinnse.MultiHeadANN` concatenates its heads into one tensor unless ``return_dict=True``.
 
 .. autoclass:: ANN
 
