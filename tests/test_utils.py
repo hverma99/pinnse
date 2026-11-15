@@ -1,3 +1,6 @@
+import os
+import random
+
 import torch
 import torch.nn as nn
 
@@ -5,7 +8,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pinnse import ANN, Analyze, Denormalization, Noise, Normalization, Save
+from pinnse import (
+    ANN,
+    Analyze,
+    Denormalization,
+    Noise,
+    Normalization,
+    Save,
+    seed_everything,
+)
 
 SPECIES = ["A", "B"]
 
@@ -443,3 +454,30 @@ def test_gaussian_clipping_and_reproducibility(measurements):
 def test_gaussian_rejects_unknown_mode(measurements):
     with pytest.raises(ValueError, match="mode must be one of"):
         Noise.gaussian(measurements, 0.1, mode="uniform")
+
+
+# ------------------------------- seed_everything -----------------------------
+def _draws():
+    return random.random(), float(np.random.rand()), torch.rand(1).item()
+
+
+def test_seed_everything_seeds_python_numpy_and_torch():
+    seed_everything(3)
+    first = _draws()
+    seed_everything(3)
+    assert _draws() == first
+    assert not torch.are_deterministic_algorithms_enabled()
+
+
+def test_seed_everything_deterministic_mode(monkeypatch):
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    os.environ.pop("CUBLAS_WORKSPACE_CONFIG", None)
+    try:
+        seed_everything(0, deterministic=True)
+        assert torch.are_deterministic_algorithms_enabled()
+        assert torch.backends.cudnn.deterministic
+        assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
+    finally:
+        seed_everything(0)
+    assert not torch.are_deterministic_algorithms_enabled()
+    assert not torch.backends.cudnn.deterministic
