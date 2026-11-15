@@ -350,8 +350,8 @@ from pinnse import (
 | Method | Purpose |
 |---|---|
 | `labeled_data_loader()` | Splits labelled data into train/validation/test `DataLoader` objects. |
-| `phys_colloc_loader()` | Generates physics-collocation points using Latin Hypercube Sampling (LHS). Composition variables (prefixed `Z_`, `X_`, `Y_`) are sampled from Dirichlet distributions so mole fractions sum to 1. |
-| `bnd_colloc_loader()` | Generates boundary-collocation points with one input fixed (e.g., reactor volume = 0 for inlet conditions). |
+| `phys_colloc_loader()` | Generates physics-collocation points using Latin Hypercube Sampling (LHS). Mole-fraction groups (columns prefixed `Z_`, `X_`, `Y_`, or listed in `simplex_groups`) are sampled from Dirichlet distributions so they sum to 1; they must be left unnormalized. |
+| `bnd_colloc_loader()` | Generates boundary-collocation points with the last input fixed (e.g., reactor volume at the inlet): at its smallest value in the data by default, or at `bnd_value` (in normalized units). |
 | `inspect_loader()` | Prints loader summary (batch shapes, number of batches). |
 | `save_loaders()` | Exports loader contents to Excel for inspection. |
 
