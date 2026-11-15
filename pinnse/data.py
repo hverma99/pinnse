@@ -10,6 +10,8 @@ import pandas as pd
 from scipy.stats import qmc
 from sklearn.model_selection import train_test_split
 
+from ._deprecation import warn_renamed
+
 # Column-name prefixes recognized as mole-fraction groups when `simplex_groups`
 # is not given, and the tolerance on their row sums.
 SIMPLEX_PREFIXES = ("Z_", "X_", "Y_")
@@ -108,7 +110,7 @@ class DataModule:
         Number of physics-collocation points and points per batch. Required
         only by `phys_colloc_loader`.
 
-    boundary_coll_data_size, boundry_coll_batch_size : int, optional
+    boundary_coll_data_size, boundary_coll_batch_size : int, optional
         Number of boundary-collocation points and points per batch. Required
         only by `bnd_colloc_loader`.
 
@@ -138,6 +140,10 @@ class DataModule:
         If given, the shuffled loaders draw their batch order from a
         generator seeded with this value instead of PyTorch's global
         generator.
+
+    boundry_coll_batch_size : int, optional
+        Deprecated spelling of `boundary_coll_batch_size`, accepted as a
+        keyword until pinnse 2.0.
     """
 
     def __init__(
@@ -148,20 +154,33 @@ class DataModule:
         physics_coll_data_size: Optional[int] = None,
         physics_coll_batch_size: Optional[int] = None,
         boundary_coll_data_size: Optional[int] = None,
-        boundry_coll_batch_size: Optional[int] = None,
+        boundary_coll_batch_size: Optional[int] = None,
         test_frac: Optional[float] = DEFAULT_TEST_FRAC,
         val_frac: Optional[float] = DEFAULT_VAL_FRAC,
         random_state: Optional[int] = 42,
         simplex_groups: Optional[list[list[str]]] = None,
         shuffle_seed: Optional[int] = None,
+        *,
+        boundry_coll_batch_size: Optional[int] = None,
     ):
+        if boundry_coll_batch_size is not None:
+            if boundary_coll_batch_size is not None:
+                raise TypeError(
+                    "Pass boundary_coll_batch_size only; boundry_coll_batch_size "
+                    "is its deprecated spelling."
+                )
+            warn_renamed(
+                "DataModule(boundry_coll_batch_size=...)", "boundary_coll_batch_size"
+            )
+            boundary_coll_batch_size = boundry_coll_batch_size
+
         self.I_S_data = I_S_data
         self.D_S_data = D_S_data
         self.labeled_data_batch_size = labeled_data_batch_size
         self.physics_coll_data_size = physics_coll_data_size
         self.physics_coll_batch_size = physics_coll_batch_size
-        self.boundry_coll_data_size = boundary_coll_data_size
-        self.boundry_coll_batch_size = boundry_coll_batch_size
+        self.boundary_coll_data_size = boundary_coll_data_size
+        self.boundary_coll_batch_size = boundary_coll_batch_size
         self.test_frac = _frac(test_frac, DEFAULT_TEST_FRAC)
         self.val_frac = _frac(val_frac, DEFAULT_VAL_FRAC)
         self.random_state = random_state
@@ -174,6 +193,28 @@ class DataModule:
         self.upper_bnd = X.max(axis=0)
 
         self.simplex_groups = self._resolve_simplex_groups(simplex_groups)
+
+    @property
+    def boundry_coll_data_size(self) -> Optional[int]:
+        """Deprecated alias of `boundary_coll_data_size`."""
+        warn_renamed("DataModule.boundry_coll_data_size", "boundary_coll_data_size")
+        return self.boundary_coll_data_size
+
+    @boundry_coll_data_size.setter
+    def boundry_coll_data_size(self, value: Optional[int]) -> None:
+        warn_renamed("DataModule.boundry_coll_data_size", "boundary_coll_data_size")
+        self.boundary_coll_data_size = value
+
+    @property
+    def boundry_coll_batch_size(self) -> Optional[int]:
+        """Deprecated alias of `boundary_coll_batch_size`."""
+        warn_renamed("DataModule.boundry_coll_batch_size", "boundary_coll_batch_size")
+        return self.boundary_coll_batch_size
+
+    @boundry_coll_batch_size.setter
+    def boundry_coll_batch_size(self, value: Optional[int]) -> None:
+        warn_renamed("DataModule.boundry_coll_batch_size", "boundary_coll_batch_size")
+        self.boundary_coll_batch_size = value
 
     def _resolve_simplex_groups(
         self, simplex_groups: Optional[list[list[str]]]
@@ -387,8 +428,8 @@ class DataModule:
         - All other input variables are sampled using Latin Hypercube Sampling
           over their admissible bounds.
         """
-        N_bc = _require_size(self.boundry_coll_data_size, "boundary_coll_data_size")
-        _require_size(self.boundry_coll_batch_size, "boundry_coll_batch_size")
+        N_bc = _require_size(self.boundary_coll_data_size, "boundary_coll_data_size")
+        _require_size(self.boundary_coll_batch_size, "boundary_coll_batch_size")
         rng = np.random.default_rng(self.random_state)
         dim_in = self.I_S_data.shape[1]
 
@@ -414,7 +455,11 @@ class DataModule:
 
         X_bc = np.hstack([X_free, np.full((N_bc, 1), bnd_value, dtype=np.float32)])
         return _make_loader(
-            (X_bc,), self.boundry_coll_batch_size, shuffle, drop_last, self.shuffle_seed
+            (X_bc,),
+            self.boundary_coll_batch_size,
+            shuffle,
+            drop_last,
+            self.shuffle_seed,
         )
 
     def inspect_loader(self, name: str, loader: torch.utils.data.DataLoader):

@@ -22,7 +22,7 @@ def module(tabular_data):
         physics_coll_data_size=64,
         physics_coll_batch_size=16,
         boundary_coll_data_size=32,
-        boundry_coll_batch_size=8,
+        boundary_coll_batch_size=8,
         test_frac=0.1,
         val_frac=0.1,
     )
@@ -75,7 +75,7 @@ def test_colloc_loaders_do_not_depend_on_labeled_loader(tabular_data):
         physics_coll_data_size=32,
         physics_coll_batch_size=16,
         boundary_coll_data_size=16,
-        boundry_coll_batch_size=8,
+        boundary_coll_batch_size=8,
     )
     # bounds are available from construction, so either loader may come first
     np.testing.assert_allclose(dm.lower_bnd, I_S.min().to_numpy(), rtol=1e-6)
@@ -180,7 +180,7 @@ def test_phys_colloc_requires_sizes(tabular_data, sizes, missing):
     [
         ({}, "boundary_coll_data_size"),
         ({"boundary_coll_data_size": -5}, "boundary_coll_data_size"),
-        ({"boundary_coll_data_size": 16}, "boundry_coll_batch_size"),
+        ({"boundary_coll_data_size": 16}, "boundary_coll_batch_size"),
     ],
 )
 def test_bnd_colloc_requires_sizes(tabular_data, sizes, missing):

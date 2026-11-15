@@ -701,7 +701,7 @@ def test_lbfgs_rejects_unknown_mode(tmp_path):
 def test_lbfgs_modes_select_loss_terms(tmp_path, mode, uses):
     t = make_trainer(tmp_path, phys_weight=0.5, bnd_weight=2.0)
     torch.save({"model_state_dict": t.model.state_dict()}, t.ckpt_path)
-    h = t.lbfgs_step(mode=mode, N_LBFGS=3, verbose=False)
+    h = t.lbfgs_step(mode=mode, n_steps=3, verbose=False)
 
     assert {len(v) for v in h.values()} == {3}
     for name, key in (("d", "loss_d"), ("p", "loss_p"), ("b", "loss_b")):
@@ -721,7 +721,7 @@ def test_lbfgs_reduces_loss_and_keeps_best_state(tmp_path, capsys):
     with torch.no_grad():
         initial = t.loss_fn(t.model(X), Y).item()
 
-    h = t.lbfgs_step(mode="data", N_LBFGS=10, verbose=True)
+    h = t.lbfgs_step(mode="data", n_steps=10, verbose=True)
 
     assert min(h["loss_t"]) < initial / 2
     with torch.no_grad():
@@ -741,7 +741,7 @@ def test_lbfgs_optimizes_and_restores_inverse_parameter(tmp_path):
     t._save_checkpoint()
     assert any(p is theta for p in t.agg_params)
 
-    h = t.lbfgs_step(mode="physics", N_LBFGS=5, verbose=False)
+    h = t.lbfgs_step(mode="physics", n_steps=5, verbose=False)
     assert theta.item() != 1.5
     assert min(h["loss_p"]) < h["loss_p"][0] or h["loss_p"][-1] == min(h["loss_p"])
     torch.testing.assert_close(torch.load(t.ckpt_path)["theta"], theta.detach())
@@ -759,14 +759,14 @@ def test_lbfgs_rejects_mode_without_active_term(tmp_path, mode, kw):
     kw = {"phys_weight": 1.0, "bnd_weight": 1.0, **kw}
     t = make_trainer(tmp_path, **kw)
     with pytest.raises(ValueError, match="no active loss term"):
-        t.lbfgs_step(mode=mode, N_LBFGS=2, verbose=False)
+        t.lbfgs_step(mode=mode, n_steps=2, verbose=False)
 
 
 def test_lbfgs_non_finite_steps_keep_the_previous_checkpoint(tmp_path):
     t = make_trainer(tmp_path, bnd=False, phys_residual=lambda x, y: y * float("nan"))
     t._save_checkpoint()
     saved = copy.deepcopy(t.model.state_dict())
-    h = t.lbfgs_step(mode="physics", N_LBFGS=2, verbose=False)
+    h = t.lbfgs_step(mode="physics", n_steps=2, verbose=False)
     assert all(math.isnan(v) for v in h["loss_t"])
     for k, v in t.model.state_dict().items():
         torch.testing.assert_close(v, saved[k])
@@ -775,7 +775,7 @@ def test_lbfgs_non_finite_steps_keep_the_previous_checkpoint(tmp_path):
 def test_lbfgs_combined_without_collocation_data_uses_data_loss(tmp_path):
     t = make_trainer(tmp_path, phys=False, bnd=False, phys_weight=1.0, bnd_weight=1.0)
     torch.save({"model_state_dict": t.model.state_dict()}, t.ckpt_path)
-    h = t.lbfgs_step(mode="combined", N_LBFGS=2, verbose=False)
+    h = t.lbfgs_step(mode="combined", n_steps=2, verbose=False)
     assert all(v > 0 for v in h["loss_d"])
     assert h["loss_p"] == [0.0, 0.0] and h["loss_b"] == [0.0, 0.0]
     assert t.X_phys_all is None and t.X_bnd_all is None

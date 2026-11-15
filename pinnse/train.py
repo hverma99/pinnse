@@ -36,6 +36,8 @@ from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
 from tqdm import tqdm
 
+from ._deprecation import warn_renamed
+
 CKPT_METRICS = ("total", "total_current", "data")
 
 
@@ -616,7 +618,14 @@ class Training(object):
             "inv_param": inv_param,
         }
 
-    def lbfgs_step(self, mode: str, N_LBFGS: int = 50, verbose: bool = True):
+    def lbfgs_step(
+        self,
+        mode: str,
+        n_steps: Optional[int] = None,
+        verbose: bool = True,
+        *,
+        N_LBFGS: Optional[int] = None,
+    ):
         """
         Second-phase full-batch LBFGS optimization, started from the best
         checkpoint written by `adam_step`. The trainable network parameters
@@ -632,17 +641,27 @@ class Training(object):
             - "overall physics" : physics + boundary losses
             - "combined" : data + physics + boundary losses
 
-        N_LBFGS : int, optional, default=50
+        n_steps : int, optional, default=50
             Number of LBFGS outer steps.
 
         verbose : bool, optional, default=True
             Whether to print optimization progress.
+
+        N_LBFGS : int, optional
+            Deprecated name of `n_steps`, accepted as a keyword until pinnse 2.0.
 
         Returns
         -------
         history_lbfgs : dict
             Dictionary containing LBFGS loss histories.
         """
+        if N_LBFGS is not None:
+            if n_steps is not None:
+                raise TypeError("Pass n_steps only; N_LBFGS is its deprecated name.")
+            warn_renamed("lbfgs_step(N_LBFGS=...)", "n_steps")
+            n_steps = N_LBFGS
+        n_steps = _require_positive_int(50 if n_steps is None else n_steps, "n_steps")
+
         mode = mode.lower()
         valid_modes = ("data", "physics", "boundary", "combined", "overall physics")
         if mode not in valid_modes:
@@ -738,7 +757,7 @@ class Training(object):
 
             return total, ld, lp, lb
 
-        pbar = tqdm(range(1, N_LBFGS + 1), desc=f"LBFGS [{mode}]", unit="step")
+        pbar = tqdm(range(1, n_steps + 1), desc=f"LBFGS [{mode}]", unit="step")
 
         for step in pbar:
             self.lbfgs.step(closure)

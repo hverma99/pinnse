@@ -8,7 +8,7 @@ models include:
 - ANN           : standard fully connected feedforward neural network
 - SANN          : ANN with a softplus output, for non-negative outputs
 - MultiHeadANN  : shared-trunk network with multiple output heads
-- Fourier_ANN   : feedforward network with Fourier-feature augmentation
+- FourierANN    : feedforward network with Fourier-feature augmentation
 - RecurrentANN  : recurrent sequence-to-sequence network for state-transition (discrete-time) formulations
 
 These architectures are designed to support flexible experimentation with
@@ -19,6 +19,8 @@ import numbers
 
 import torch
 import torch.nn as nn
+
+from ._deprecation import warn_renamed
 
 
 def _check_layer_size(layer_size) -> None:
@@ -211,7 +213,7 @@ class MultiHeadANN(nn.Module):
         return torch.cat(list(outputs.values()), dim=-1)
 
 
-class Fourier_ANN(nn.Module):
+class FourierANN(nn.Module):
     """
     Feedforward neural network with Fourier-feature augmentation.
 
@@ -292,6 +294,18 @@ class Fourier_ANN(nn.Module):
 
         raw = self.net(x)
         return self.softplus(raw) if self.positive_output else raw
+
+
+class Fourier_ANN(FourierANN):
+    """
+    Deprecated alias of `FourierANN`, kept until pinnse 2.0.
+
+    Construction emits a DeprecationWarning; the model is otherwise identical.
+    """
+
+    def __init__(self, *args, **kwargs):
+        warn_renamed("Fourier_ANN", "FourierANN")
+        super().__init__(*args, **kwargs)
 
 
 class RecurrentANN(nn.Module):

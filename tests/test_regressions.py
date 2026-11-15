@@ -152,9 +152,8 @@ def test_B06_default_boundary_value_lies_in_the_data_domain():
     I_S = pd.DataFrame({"x": np.linspace(0, 1, 50), "V": np.linspace(0, 10, 50)})
     D_S = pd.DataFrame({"y": np.linspace(0, 1, 50)})
     norm_I_S, _ = Normalization.min_max(I_S)  # V scaled to [0, 1]
-    dm = DataModule(
-        norm_I_S, D_S, 10, boundary_coll_data_size=8, boundry_coll_batch_size=8
-    )
+    # positional sizes: (labeled batch, physics N, physics batch, boundary N, boundary batch)
+    dm = DataModule(norm_I_S, D_S, 10, None, None, 8, 8)
     X = dm.bnd_colloc_loader(shuffle=False).dataset.tensors[0].numpy()
     assert np.all(X[:, -1] == 0.0)
 
@@ -175,7 +174,7 @@ def test_B08_lbfgs_rejects_mode_without_active_term(tmp_path):
     t._save_checkpoint()
     before = [p.detach().clone() for p in t.model.parameters()]
     with pytest.raises(ValueError, match="no active loss term"):
-        t.lbfgs_step(mode="physics", N_LBFGS=2, verbose=False)
+        t.lbfgs_step("physics", 2, verbose=False)
     for a, b in zip(before, t.model.parameters()):
         assert torch.equal(a, b)
 

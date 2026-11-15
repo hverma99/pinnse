@@ -5,7 +5,7 @@ import torch.nn as nn
 
 import pytest
 
-from pinnse import ANN, SANN, Fourier_ANN, MultiHeadANN, RecurrentANN
+from pinnse import ANN, SANN, FourierANN, MultiHeadANN, RecurrentANN
 
 
 def linear_layers(module):
@@ -117,16 +117,16 @@ def test_multihead_rejects_empty_trunk_or_heads(trunk, heads, match):
         MultiHeadANN(2, trunk, heads, nn.Tanh)
 
 
-@pytest.mark.parametrize("cls", [ANN, SANN, Fourier_ANN])
+@pytest.mark.parametrize("cls", [ANN, SANN, FourierANN])
 @pytest.mark.parametrize("layer_size", [[3], [], [3, 0, 1], [3, 2.5, 1], [True, 4]])
 def test_feedforward_models_reject_bad_layer_sizes(cls, layer_size):
     with pytest.raises(ValueError, match="layer_size must list"):
         cls(layer_size, activation=nn.Tanh)
 
 
-# -------------------------------- Fourier_ANN --------------------------------
+# -------------------------------- FourierANN --------------------------------
 def test_fourier_input_width_is_expanded():
-    model = Fourier_ANN([3, 16, 2], activation=nn.Tanh, fourier_levels=4)
+    model = FourierANN([3, 16, 2], activation=nn.Tanh, fourier_levels=4)
     # two untouched inputs + sin/cos at four frequencies of the last input
     assert linear_layers(model)[0].in_features == 2 + 2 * 4
     assert model(torch.randn(5, 3)).shape == (5, 2)
@@ -135,7 +135,7 @@ def test_fourier_input_width_is_expanded():
 
 def test_fourier_features_match_manual_encoding():
     levels = 3
-    model = Fourier_ANN([2, 4, 1], fourier_levels=levels)
+    model = FourierANN([2, 4, 1], fourier_levels=levels)
     x = torch.tensor([[0.3, 0.25], [-0.7, -0.5]])
 
     v = x[:, -1:]
@@ -146,7 +146,7 @@ def test_fourier_features_match_manual_encoding():
 
 
 def test_fourier_features_are_periodic_in_last_input():
-    model = Fourier_ANN([2, 8, 2], fourier_levels=5)
+    model = FourierANN([2, 8, 2], fourier_levels=5)
     x = torch.randn(6, 2)
     shifted = x.clone()
     shifted[:, -1] += 2.0  # lowest frequency is pi, so the period is 2
@@ -155,15 +155,15 @@ def test_fourier_features_are_periodic_in_last_input():
 
 
 def test_fourier_with_zero_levels_is_plain_network():
-    model = Fourier_ANN([3, 8, 2], fourier_levels=0)
+    model = FourierANN([3, 8, 2], fourier_levels=0)
     assert linear_layers(model)[0].in_features == 3
     x = torch.randn(4, 3)
     torch.testing.assert_close(model(x), model.net(x))
 
 
 def test_fourier_positive_output_flag():
-    raw = Fourier_ANN([2, 8, 1], fourier_levels=2, positive_output=False)
-    pos = Fourier_ANN([2, 8, 1], fourier_levels=2, positive_output=True)
+    raw = FourierANN([2, 8, 1], fourier_levels=2, positive_output=False)
+    pos = FourierANN([2, 8, 1], fourier_levels=2, positive_output=True)
     pos.load_state_dict(raw.state_dict())
     with torch.no_grad():
         raw.net[-1].bias.fill_(-10.0)
