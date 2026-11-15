@@ -763,7 +763,12 @@ def test_lbfgs_rejects_mode_without_active_term(tmp_path, mode, kw):
 
 
 def test_lbfgs_non_finite_steps_keep_the_previous_checkpoint(tmp_path):
-    t = make_trainer(tmp_path, bnd=False, phys_residual=lambda x, y: y * float("nan"))
+    t = make_trainer(
+        tmp_path,
+        bnd=False,
+        phys_residual=lambda x, y: y * float("nan"),
+        check_residuals=False,
+    )
     t._save_checkpoint()
     saved = copy.deepcopy(t.model.state_dict())
     h = t.lbfgs_step(mode="physics", n_steps=2, verbose=False)
