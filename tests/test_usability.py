@@ -15,6 +15,7 @@ import pytest
 from pinnse import (
     ANN,
     DataModule,
+    Plotter,
     SequenceDataModule,
     Training,
 )
@@ -65,6 +66,17 @@ def make(tmp_path, model=None, theta=None, **kw):
     )
     args.update(kw)
     return Training(**args)
+
+
+# ------------------------------------------------------------- history entries
+def test_plotter_uses_recorded_validation_epochs():
+    h = {"val_loss_t": [3.0, 2.0, 1.0], "val_epochs": [5, 10, 20]}
+    np.testing.assert_array_equal(Plotter(h)._val_epochs(3), [5, 10, 20])
+    np.testing.assert_array_equal(Plotter({"val_loss_t": [1.0]})._val_epochs(2), [1, 2])
+    # an incomplete record falls back to val_every
+    np.testing.assert_array_equal(
+        Plotter({"val_epochs": [7]}, val_every=4)._val_epochs(2), [4, 8]
+    )
 
 
 # ---------------------------------------------------------- data-module checks
