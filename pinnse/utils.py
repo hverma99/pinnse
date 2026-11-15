@@ -1,5 +1,6 @@
 import os
 import random
+import warnings
 
 import torch
 import torch.nn as nn
@@ -110,7 +111,7 @@ class Normalization:
             return
 
         if gmin is None or gmax is None:
-            vals = data[cols].values.astype(np.float32)
+            vals = data[cols].to_numpy(dtype=np.float64)
             gmin, gmax = vals.min(), vals.max()
 
         for col in cols:
@@ -184,9 +185,9 @@ class Normalization:
 
             flow_vals = []
             if in_cols:
-                flow_vals.append(I_S_data[in_cols].values.astype(np.float32).ravel())
+                flow_vals.append(I_S_data[in_cols].to_numpy(dtype=np.float64).ravel())
             if ot_cols:
-                flow_vals.append(D_S_data[ot_cols].values.astype(np.float32).ravel())
+                flow_vals.append(D_S_data[ot_cols].to_numpy(dtype=np.float64).ravel())
 
             if flow_vals:
                 all_flow = np.concatenate(flow_vals)
@@ -278,7 +279,8 @@ class Normalization:
         cols = normalize_cols if normalize_cols is not None else list(data.columns)
         for col in cols:
             cmax = abs(data[col]).max()
-            data_norm[col] = data[col] / cmax
+            # An all-zero column has no scale; map it to 0 rather than NaN.
+            data_norm[col] = data[col] / cmax if cmax != 0 else 0.0
             metrics[col] = {"max": float(cmax)}
         return data_norm, metrics
 
@@ -556,7 +558,7 @@ class Analyze:
         layer_size = [dim_in] + [width] * depth + [dim_out]
         model = ANN(layer_size=layer_size, activation=activation).to(device)
 
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
         model.load_state_dict(ckpt.get("model_state_dict", ckpt))
         model.eval()
         return model
@@ -669,18 +671,36 @@ class Analyze:
         -------
         pd.DataFrame
             Error metrics for each output group.
+
+        Notes
+        -----
+        - Entries whose reference value is missing (non-finite) are skipped.
+        - If any prediction at a scored entry is non-finite, the group's
+          metrics are NaN and a RuntimeWarning is issued, so that a diverged
+          model is never reported on its finite predictions alone.
         """
+        nan_metrics = {"MAE": np.nan, "RMSE": np.nan, "R2": np.nan}
 
-        def calc_metrics(y_true, y_pred):
-            y_true = np.asarray(y_true).ravel()
-            y_pred = np.asarray(y_pred).ravel()
+        def calc_metrics(name, y_true, y_pred):
+            y_true = np.asarray(y_true, dtype=np.float64).ravel()
+            y_pred = np.asarray(y_pred, dtype=np.float64).ravel()
 
-            mask = np.isfinite(y_true) & np.isfinite(y_pred)
-            y_true = y_true[mask]
-            y_pred = y_pred[mask]
+            known = np.isfinite(y_true)
+            y_true = y_true[known]
+            y_pred = y_pred[known]
 
             if len(y_true) == 0:
-                return {"MAE": np.nan, "RMSE": np.nan, "R2": np.nan}
+                return dict(nan_metrics)
+
+            n_bad = int(np.count_nonzero(~np.isfinite(y_pred)))
+            if n_bad:
+                warnings.warn(
+                    f"{n_bad} of {len(y_pred)} predictions for output {name!r} are "
+                    "not finite; its error metrics are reported as NaN.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                return dict(nan_metrics)
 
             mae = np.mean(np.abs(y_true - y_pred))
             rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
@@ -691,7 +711,7 @@ class Analyze:
 
         rows = []
         for name, cols in groups.items():
-            m = calc_metrics(df_true[cols].to_numpy(), df_pred[cols].to_numpy())
+            m = calc_metrics(name, df_true[cols].to_numpy(), df_pred[cols].to_numpy())
             rows.append({"Output": name, **m})
 
         return pd.DataFrame(rows)

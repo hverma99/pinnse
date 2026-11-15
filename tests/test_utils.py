@@ -324,13 +324,29 @@ def test_error_metrics_known_values():
 def test_error_metrics_perfect_prediction_and_non_finite_values():
     truth = pd.DataFrame({"a": [1.0, 2.0, np.nan, 4.0], "b": [np.nan] * 4})
     pred = pd.DataFrame({"a": [1.0, 2.0, 3.0, np.inf], "b": [1.0] * 4})
-    a, b = Analyze.error_metrics(truth, pred, {"a": ["a"], "b": ["b"]}).to_dict(
-        "records"
-    )
+    with pytest.warns(RuntimeWarning, match="not finite"):
+        out = Analyze.error_metrics(truth, pred, {"a": ["a"], "b": ["b"]})
+    a, b = out.to_dict("records")
 
-    # only the two finite pairs are scored
-    assert (a["MAE"], a["RMSE"], a["R2"]) == (0.0, 0.0, 1.0)
+    # missing reference values are skipped, but a non-finite prediction at a
+    # scored entry invalidates the group rather than being dropped
+    assert np.isnan(a["MAE"]) and np.isnan(a["RMSE"]) and np.isnan(a["R2"])
     assert np.isnan(b["MAE"]) and np.isnan(b["RMSE"]) and np.isnan(b["R2"])
+
+
+def test_error_metrics_skips_missing_reference_values():
+    truth = pd.DataFrame({"a": [1.0, 2.0, np.nan, 4.0]})
+    pred = pd.DataFrame({"a": [1.0, 2.0, np.inf, 4.0]})
+    (a,) = Analyze.error_metrics(truth, pred, {"a": ["a"]}).to_dict("records")
+    assert (a["MAE"], a["RMSE"], a["R2"]) == (0.0, 0.0, 1.0)
+
+
+def test_error_metrics_warns_on_non_finite_predictions():
+    truth = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+    pred = pd.DataFrame({"a": [1.0, np.nan, 3.0]})
+    with pytest.warns(RuntimeWarning, match="1 of 3 predictions for output 'a'"):
+        out = Analyze.error_metrics(truth, pred, {"a": ["a"]})
+    assert out["MAE"].isna().all()
 
 
 # ------------------------------------ Save -----------------------------------
@@ -454,6 +470,24 @@ def test_gaussian_clipping_and_reproducibility(measurements):
 def test_gaussian_rejects_unknown_mode(measurements):
     with pytest.raises(ValueError, match="mode must be one of"):
         Noise.gaussian(measurements, 0.1, mode="uniform")
+
+
+def test_max_abs_maps_an_all_zero_column_to_zero():
+    frame = pd.DataFrame({"z": [0.0, 0.0, 0.0], "b": [1.0, -2.0, 4.0]})
+    norm, metrics = Normalization.max_abs(frame)
+    assert norm["z"].tolist() == [0.0, 0.0, 0.0]
+    assert metrics["z"] == {"max": 0.0}
+    pd.testing.assert_frame_equal(Denormalization.max_abs(norm, metrics), frame)
+
+
+def test_global_pfr_metrics_keep_full_precision():
+    I_S = pd.DataFrame({"F_in_A": [0.0, 1234.5678901], "V": [0.0, 1.0]})
+    D_S = pd.DataFrame({"F_ot_A": [0.1, 1000.123456789]})
+    _, _, m_in, m_out = Normalization.min_max_pfr(I_S, D_S, "EFM", ["A"])
+    assert m_in["F_in_A"]["max"] == 1234.5678901
+    assert m_out["F_ot_A"]["max"] == 1234.5678901
+    _, _, m_in, _ = Normalization.min_max_pfr(I_S, D_S, "ERM", ["A"])
+    assert m_in["F_in_A"]["max"] == 1234.5678901
 
 
 # ------------------------------- seed_everything -----------------------------

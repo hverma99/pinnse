@@ -17,6 +17,7 @@ import pinnse.PINNs
 import pinnse.train
 from pinnse import (
     ANN,
+    Analyze,
     DataModule,
     MultiHeadANN,
     Normalization,
@@ -125,6 +126,16 @@ def test_B03_compositions_only_dirichlet_sampled_when_they_sum_to_one():
     assert np.unique(x).size > 1 and x.min() >= 0.2 - 1e-6
 
 
+# ----------------------------------- B04 -------------------------------------
+def test_B04_error_metrics_do_not_hide_non_finite_predictions():
+    truth = pd.DataFrame({"a": np.arange(10.0)})
+    pred = truth.copy()
+    pred.loc[1:, "a"] = np.nan  # 9 of 10 predictions diverged
+    with pytest.warns(RuntimeWarning):
+        out = Analyze.error_metrics(truth, pred, {"a": ["a"]})
+    assert out["MAE"].isna().all() and out["RMSE"].isna().all()
+
+
 # ----------------------------------- B05 -------------------------------------
 def test_B05_multihead_model_trains_with_training(tmp_path):
     torch.manual_seed(0)
@@ -169,6 +180,12 @@ def test_B08_lbfgs_rejects_mode_without_active_term(tmp_path):
         assert torch.equal(a, b)
 
 
+# ----------------------------------- B09 -------------------------------------
+def test_B09_max_abs_handles_all_zero_column():
+    norm, _ = Normalization.max_abs(pd.DataFrame({"a": [0.0, 0.0], "b": [1.0, -2.0]}))
+    assert not norm.isna().any().any()
+
+
 # ----------------------------------- B10 -------------------------------------
 def test_B10_default_split_fractions_are_explicit(tabular_data):
     I_S, D_S = tabular_data
@@ -177,6 +194,14 @@ def test_B10_default_split_fractions_are_explicit(tabular_data):
     X = np.zeros((10, 5, 2))
     sdm = SequenceDataModule(X, X, 2)
     assert (sdm.test_frac, sdm.val_frac) == (0.25, 0.25)
+
+
+# ----------------------------------- B11 -------------------------------------
+def test_B11_global_normalization_metrics_are_not_rounded_to_float32():
+    I_S = pd.DataFrame({"F_in_A": [0.0, 1234.5678901], "V": [0.0, 1.0]})
+    D_S = pd.DataFrame({"F_ot_A": [0.1, 1000.123456789]})
+    _, _, m_in, _ = Normalization.min_max_pfr(I_S, D_S, "EFM", ["A"])
+    assert m_in["F_in_A"]["max"] == 1234.5678901
 
 
 # ----------------------------------- B12 -------------------------------------
@@ -217,4 +242,5 @@ def test_B14_checkpoints_are_loaded_weights_only(tmp_path, monkeypatch):
 
     monkeypatch.setattr(torch, "load", spy)
     t._load_checkpoint()
-    assert seen == [True]
+    Analyze.load_ann_pinn(1, 1, 1, 8, nn.Tanh, t.ckpt_path, torch.device("cpu"))
+    assert seen == [True, True]
