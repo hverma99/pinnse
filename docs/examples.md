@@ -23,6 +23,23 @@ evaluation. The {doc}`quickstart` walks through it step by step.
 | `nonisopfr` | Nonisothermal PFR with coupled mass and energy balances. | Coupled ODEs: mass balance and energy balance with heat exchange |
 | `dynamic.cstr` | Recurrent PINN ({class}`~pinnse.RecurrentANN`, {class}`~pinnse.SequenceDataModule`) for a nonisothermal CSTR. It predicts the state trajectory (concentration and temperature over 200 steps) from an initial condition and a piecewise-constant coolant schedule. `check.py` compares it with a per-step feedforward network, an autoregressive single-transition model, and the best accuracy any function of the instantaneous input can reach. | Unrolled discrete-time residual between successive predicted states; `SCHEME` selects Euler, backward Euler, trapezoid or RK4, and `CELL` selects RNN, GRU or LSTM |
 
+## Checking that an example runs
+
+The examples train for tens of thousands of epochs. To check that one still
+runs end to end, without waiting for an accurate model, run its scripts through
+`examples/smoke.py`, which stops every `adam_step` after 5 epochs and every
+`lbfgs_step` after 2 steps (change these with `--epochs` and `--lbfgs-steps`):
+
+```bash
+cd examples/isopfr/efm
+python ../../smoke.py main.py
+python ../../smoke.py check.py
+```
+
+`nox -s examples` does this for every example in a temporary copy of
+`examples/`, running `main.py` and then `check.py`. It skips the flash
+`check.py` scripts, which need Aspen Plus.
+
 ## Files in an example
 
 | File | Purpose |

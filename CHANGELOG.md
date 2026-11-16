@@ -81,7 +81,8 @@ settles the public API. Upgrading from 0.2: see the
 - Training losses are read back once per epoch rather than after every batch.
 - Declared minimum dependency versions: numpy 1.24, pandas 2.0,
   scikit-learn 1.2, tqdm 4.65, openpyxl 3.1 (scipy 1.15, torch 2.0 and
-  matplotlib 3.8 as before).
+  matplotlib 3.8 as before). CI runs the test suite with every dependency at
+  exactly these versions on Python 3.11 (`nox -s minimums`).
 - Internal simplification without behaviour change: shared builders for the
   networks, one residual-loss path in `Training`, table-driven plotting, and
   shared split/loader helpers (results verified bit-for-bit).
@@ -111,6 +112,9 @@ settles the public API. Upgrading from 0.2: see the
 - `Normalization.centered()`, the general centered scaling behind
   `min_max_pfr`.
 - `DataModule(simplex_groups=...)` and a full `DataModule` docstring.
+- `examples/smoke.py`, which runs an example script with training cut to a few
+  epochs to check that it still works end to end. CI runs every example this
+  way (`nox -s examples`).
 
 ### Deprecated
 

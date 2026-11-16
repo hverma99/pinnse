@@ -24,6 +24,7 @@ coverage.xml
 examples/**/logs/
 examples/**/figures/
 examples/**/compare/
+examples/**/plots/
 
 # SLURM job logs from run.sh
 *.out
