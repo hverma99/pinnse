@@ -23,19 +23,6 @@ evaluation. The {doc}`quickstart` walks through it step by step.
 | `nonisopfr` | Nonisothermal PFR with coupled mass and energy balances. | Coupled ODEs: mass balance and energy balance with heat exchange |
 | `dynamic.cstr` | Recurrent PINN ({class}`~pinnse.RecurrentANN`, {class}`~pinnse.SequenceDataModule`) for a nonisothermal CSTR. It predicts the state trajectory (concentration and temperature over 200 steps) from an initial condition and a piecewise-constant coolant schedule. `check.py` compares it with a per-step feedforward network, an autoregressive single-transition model, and the best accuracy any function of the instantaneous input can reach. | Unrolled discrete-time residual between successive predicted states; `SCHEME` selects Euler, backward Euler, trapezoid or RK4, and `CELL` selects RNN, GRU or LSTM |
 
-## Files in an example
-
-| File | Purpose |
-|---|---|
-| `main.py` | Configuration and training script |
-| `phys_res.py` | Physics and boundary residual definitions |
-| `data_gen.py` | Dataset generation script |
-| `check.py` | Post-training evaluation and comparison |
-| `pfr_model.py` / `cstr_model.py` | Process model helper functions (where applicable) |
-| `I_S_data.xlsx` | Labelled input data |
-| `D_S_data.xlsx` | Labelled output data |
-| `run.sh` | Convenience shell script |
-
 ## Checking that an example runs
 
 The examples train for tens of thousands of epochs. To check that one still
@@ -52,3 +39,16 @@ python ../../smoke.py check.py
 `nox -s examples` does this for every example in a temporary copy of
 `examples/`, running `main.py` and then `check.py`. It skips the flash
 `check.py` scripts, which need Aspen Plus.
+
+## Files in an example
+
+| File | Purpose |
+|---|---|
+| `main.py` | Configuration and training script |
+| `phys_res.py` | Physics and boundary residual definitions |
+| `data_gen.py` | Dataset generation script |
+| `check.py` | Post-training evaluation and comparison |
+| `pfr_model.py` / `cstr_model.py` | Process model helper functions (where applicable) |
+| `I_S_data.xlsx` | Labelled input data |
+| `D_S_data.xlsx` | Labelled output data |
+| `run.sh` | Convenience shell script |
