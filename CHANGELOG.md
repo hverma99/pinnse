@@ -85,6 +85,11 @@ settles the public API. Upgrading from 0.2: see the
 - Internal simplification without behaviour change: shared builders for the
   networks, one residual-loss path in `Training`, table-driven plotting, and
   shared split/loader helpers (results verified bit-for-bit).
+- The six isothermal PFR examples share their reactor models, data
+  generation, residuals, training pipeline and evaluation in
+  `examples/isopfr/common/`; each case folder keeps only its own settings and
+  still runs from inside the folder (losses, weights and error metrics
+  verified bit-for-bit).
 
 ### Added
 

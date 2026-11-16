@@ -1,121 +1,56 @@
+"""
+Inverse EFM PINN for the isothermal PFR: estimate the activation energies of
+the three reactions from the labeled data while training the surrogate.
+
+The data loaders, network, optimizer and outputs shared by the isothermal PFR
+cases are in ../common/train.py; this file holds the settings of this case.
+"""
+
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 
-import numpy as np
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # examples/isopfr
 
-from pinnse import ANN, DataModule, Normalization, Plotter, Save, Training
-
+from common.process import k, key_species, nu, species
+from common.train import DEVICE, load_data, normalize, save_outputs, train
 from phys_res import Boundary, Physics
 
 
 def main():
-    torch.manual_seed(1234)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Process and reaction system specifications
-    species = ["O2", "CO2", "H2O", "C6H6", "C4H2O3"]
-    N_species = len(species)
-    nu = np.array(
-        [
-            [-4.5, 2.0, 2.0, -1.0, 1.0],
-            [-7.5, 6.0, 3.0, -1.0, 0.0],
-            [-3.0, 4.0, 1.0, 0.0, -1.0],
-        ],
-        dtype=np.float32,
-    )
-    key_species = ["C6H6", "C6H6", "C4H2O3"]
-    spec_index = {sp: i for i, sp in enumerate(species)}
-    k = np.array([7.7e6, 6.31e7, 2.33e4], dtype=np.float32)  # 1/s
-    R = 8.314  # J/mol/K
-
     # ------------------- Inverse PINN Setup ----------------------------
     # -------------- Unknown Activation Energy (E) ----------------------
-    E_true = np.array([105.2, 124.89, 89.66], dtype=np.float32)  # kJ/mol
-    # E = theta * 1e3, theta in kJ/mol is trainable parameter
+    # E = theta * 1e3, theta in kJ/mol is trainable parameter;
+    # the true values are common.process.E = [105.2, 124.89, 89.66] kJ/mol
     theta = nn.Parameter(
-        torch.tensor([1.0, 1.0, 1.0], dtype=torch.float32, device=device)
+        torch.tensor([1.0, 1.0, 1.0], dtype=torch.float32, device=DEVICE)
     )
     # -------------------------------------------------------------------
 
-    folder_name = "logs"
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
-
-    I_S_data = pd.read_excel(r"I_S_data.xlsx")
-    D_S_data = pd.read_excel(r"D_S_data.xlsx")
-
-    dim_in, dim_ot = I_S_data.shape[1], D_S_data.shape[1]
-
-    norm_I_S_data, norm_D_S_data, I_S_metrics, D_S_metrics = Normalization.min_max_pfr(
-        I_S_data=I_S_data, D_S_data=D_S_data, formulation="EFM", species=species
+    I_S_data, D_S_data = load_data()
+    norm_I_S_data, norm_D_S_data, I_S_metrics, D_S_metrics = normalize(
+        "EFM", I_S_data, D_S_data
     )
 
     physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, theta)
     boundary = Boundary(species)
 
-    N_C_P, N_C_B = 20000, 5000
-    B_D, B_C_P, B_C_B = 500, 500, 1000
-
-    data = DataModule(
-        I_S_data=norm_I_S_data,
-        D_S_data=norm_D_S_data,
-        labeled_data_batch_size=B_D,
-        physics_coll_data_size=N_C_P,
-        physics_coll_batch_size=B_C_P,
-        boundary_coll_data_size=N_C_B,
-        boundary_coll_batch_size=B_C_B,
-        test_frac=0.1,
-        val_frac=0.1,
-    )
-
-    train_loader, val_loader, test_loader = data.labeled_data_loader()
-    phys_coll_loader = data.phys_colloc_loader()
-    bnd_coll_loader = data.bnd_colloc_loader()
-
-    depth, width = 6, 64
-    layer_size = [dim_in] + [width] * depth + [dim_ot]
-
-    model = ANN(layer_size, activation=nn.Tanh).to(device)
-    loss_fn = nn.MSELoss()
-    optimizer = torch.optim.Adam(list(model.parameters()) + [theta], lr=5e-4)
-
-    training = Training(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        test_loader=test_loader,
-        optimizer=optimizer,
-        loss_fn=loss_fn,
-        device=device,
-        phys_coll_loader=phys_coll_loader,
-        bnd_coll_loader=bnd_coll_loader,
-        phys_residual=physics,
-        bnd_residual=boundary,
-        ckpt_path="./logs/best_model.pth",
+    return train(
+        norm_I_S_data,
+        norm_D_S_data,
+        physics,
+        boundary,
+        lr=5e-4,
+        theta=theta,  # optimized with the network
         log_grad_norms=True,  # record gradient-norm histories for the plots
-        phys_weight=1.0,
-        bnd_weight=1.0,
         adapt_wts=False,
-        theta=theta,
     )
-
-    history = training.adam_step(epochs=75000, val_every=100, verbose=True)
-    return history
 
 
 if __name__ == "__main__":
-    history = main()
-
-    Save.excel(history)
-    Save.csv(history)
-
-    folder_name = "figures"
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
-
-    plots = Plotter(history=history, val_every=100)
-    plots.plot_everything(savepath=folder_name, scale=1000)
+    save_outputs(main())

@@ -35,3 +35,26 @@ evaluation. The {doc}`quickstart` walks through it step by step.
 | `I_S_data.xlsx` | Labelled input data |
 | `D_S_data.xlsx` | Labelled output data |
 | `run.sh` | Convenience shell script |
+
+## Shared code of the isothermal PFR cases
+
+The six `isopfr` cases (`efm`, `erm`, `cm/s0`, `cm/s1`, `efm.inverse`,
+`efm.noise`) share their code in `examples/isopfr/common/`, so each case
+folder keeps only what is specific to it:
+
+| `common/` module | Contents |
+|---|---|
+| `process.py` | Reaction network, kinetics and operating ranges |
+| `pfr_model.py` | First-principles reactor models (EFM, ERM, CM) |
+| `data_gen.py` | Generation of the labelled datasets |
+| `residuals.py` | Physics and boundary residuals of each formulation |
+| `train.py` | Training pipeline: data loaders, network, optimizer, saved history and figures |
+| `evaluate.py` | Reactor-profile comparison, plots and `compare.xlsx` for `check.py` |
+
+In a case folder, `main.py` and `check.py` hold the settings of the case
+(formulation, training options, scheduler, noise, trainable parameters),
+`phys_res.py` names the residuals it trains with (`efm.inverse` defines its
+own variant there), and `data_gen.py` regenerates its data with the shared
+generator. The scripts add `examples/isopfr` to `sys.path`, so each case still
+runs from inside its folder (`python main.py`, `python check.py`,
+`sbatch run.sh`). To add a case, copy a case folder and change these files.
