@@ -195,7 +195,7 @@ Each example in the repository follows a consistent workflow, organized across a
 
 ## Walkthrough: Training a PINN Surrogate
 
-This walkthrough uses the **isothermal PFR — effluent flowrate model (EFM)** example. The full code is in `examples/isopfr/efm/main.py`.
+This walkthrough uses the **isothermal PFR — effluent flowrate model (EFM)** example. Its settings are in `examples/isopfr/efm/main.py`, and the pipeline it runs, shared by the isothermal PFR cases, in `examples/isopfr/common/train.py`.
 
 ### Step 1: Load and normalize data
 
@@ -561,6 +561,7 @@ pinnse/
 │   │   ├── case1/             #   Flash formulation 1
 │   │   └── case2/             #   Flash formulation 2
 │   ├── isopfr/                # Isothermal PFR examples
+│   │   ├── common/            #   Code shared by the isopfr cases
 │   │   ├── efm/               #   Effluent flowrate model
 │   │   ├── erm/               #   Extent of reaction model
 │   │   ├── cm/                #   Conversion model (s0: baseline, s1: with LR scheduler)

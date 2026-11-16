@@ -91,8 +91,9 @@ ignore = ["B905"]  # zip() without strict=
 "examples/**" = ["F841", "B007"]
 
 [tool.ruff.lint.isort]
-# Sibling modules imported by the example scripts.
-known-local-folder = ["cstr_model", "data_gen", "pfr_model", "phys_res"]
+# Sibling modules imported by the example scripts, and the shared package
+# examples/isopfr/common of the isothermal PFR cases.
+known-local-folder = ["common", "cstr_model", "data_gen", "main", "pfr_model", "phys_res"]
 # On Windows/Anaconda, torch must load before NumPy/SciPy (MKL), or importing
 # torch fails with "Error loading ...\torch\lib\shm.dll". Keep it first.
 section-order = ["future", "standard-library", "torch", "third-party", "first-party", "local-folder"]

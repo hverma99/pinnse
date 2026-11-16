@@ -36,8 +36,10 @@ This will:
 ## Walkthrough: training a PINN surrogate
 
 This walkthrough follows the **isothermal PFR, effluent flowrate model (EFM)**
-example. The full code is in `examples/isopfr/efm/main.py`; run the snippets
-below in order from that folder, which holds the data files and `phys_res.py`.
+example. Its settings are in `examples/isopfr/efm/main.py` and the pipeline it
+runs, shared by the isothermal PFR cases, in `examples/isopfr/common/train.py`;
+run the snippets below in order from the `efm` folder, which holds the data
+files and `phys_res.py`.
 
 ### Step 1: Load and normalize data
 
