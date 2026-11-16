@@ -56,6 +56,15 @@ extending
 
 ```{toctree}
 :maxdepth: 2
+:caption: Release notes
+:hidden:
+
+migration
+changelog
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Reference
 :hidden:
 

@@ -32,3 +32,4 @@ examples/**/compare/
 *.pdf
 *.md
 !README.md
+!CHANGELOG.md

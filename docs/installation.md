@@ -1,6 +1,6 @@
 # Installation
 
-`pinnse` requires Python 3.10 or later.
+`pinnse` requires Python 3.11 or later.
 
 ## Basic install
 

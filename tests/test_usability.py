@@ -238,7 +238,7 @@ def test_aggregator_may_return_a_python_number(tmp_path):
     def aggregator(losses, weights, params):
         total = sum(w * losses[k] for k, w in weights.items() if losses[k] is not None)
         total.backward()
-        return float(total)
+        return float(total.detach())
 
     stats = make(tmp_path, grad_aggregator=aggregator).train_epoch()
     assert stats["total_loss"] > 0
