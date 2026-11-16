@@ -36,13 +36,20 @@ This will:
 ## Walkthrough: training a PINN surrogate
 
 This walkthrough follows the **isothermal PFR, effluent flowrate model (EFM)**
-example. The full code is in `examples/isopfr/efm/main.py`.
+example. The full code is in `examples/isopfr/efm/main.py`; run the snippets
+below in order from that folder, which holds the data files and `phys_res.py`.
 
 ### Step 1: Load and normalize data
 
 ```python
+import numpy as np
 import pandas as pd
-from pinnse import Normalization
+import torch
+from pinnse import Normalization, seed_everything
+
+seed_everything(1234)  # Python, NumPy and PyTorch generators
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+species = ["O2", "CO2", "H2O", "C6H6", "C4H2O3"]
 
 I_S_data = pd.read_excel("I_S_data.xlsx")  # Inputs:  inlet flowrates, P, T, V
 D_S_data = pd.read_excel("D_S_data.xlsx")  # Outputs: outlet flowrates
@@ -52,7 +59,7 @@ norm_I_S, norm_D_S, I_S_metrics, D_S_metrics = Normalization.min_max_pfr(
     I_S_data=I_S_data,
     D_S_data=D_S_data,
     formulation="EFM",
-    species=["O2", "CO2", "H2O", "C6H6", "C4H2O3"],
+    species=species,
 )
 ```
 
@@ -76,9 +83,14 @@ data = DataModule(
 )
 
 train_loader, val_loader, test_loader = data.labeled_data_loader()
-phys_coll_loader = data.phys_colloc_loader()  # LHS + Dirichlet sampling
-bnd_coll_loader = data.bnd_colloc_loader()  # Boundary-fixed sampling
+phys_coll_loader = data.phys_colloc_loader()  # Latin hypercube sampling
+bnd_coll_loader = data.bnd_colloc_loader()  # Last input (V) fixed at its minimum
 ```
+
+Inputs that are mole fractions summing to one (e.g. feed compositions `Z_*`) are
+sampled from a Dirichlet distribution instead; pass them unnormalized and, if
+their names do not start with `Z_`, `X_` or `Y_`, list them in
+`DataModule(simplex_groups=[[...]])`.
 
 ### Step 3: Define physics and boundary residuals
 
@@ -89,6 +101,21 @@ the normalized input batch and `y` is the network output.
 ```python
 from phys_res import Physics, Boundary
 
+# Reaction network of the example
+nu = np.array(  # stoichiometric coefficients, one row per reaction
+    [
+        [-4.5, 2.0, 2.0, -1.0, 1.0],
+        [-7.5, 6.0, 3.0, -1.0, 0.0],
+        [-3.0, 4.0, 1.0, 0.0, -1.0],
+    ],
+    dtype=np.float32,
+)
+key_species = ["C6H6", "C6H6", "C4H2O3"]
+k = np.array([7.7e6, 6.31e7, 2.33e4], dtype=np.float32)  # pre-exponential factors, 1/s
+E = (
+    np.array([105.2, 124.89, 89.66], dtype=np.float32) * 1e3
+)  # activation energies, J/mol
+
 physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
 boundary = Boundary(species)
 ```
@@ -98,7 +125,7 @@ boundary = Boundary(species)
 ### Step 4: Build the model
 
 ```python
-import torch, torch.nn as nn
+import torch.nn as nn
 from pinnse import ANN
 
 dim_in = I_S_data.shape[1]  # Number of input features

@@ -1,6 +1,3 @@
-import torch
-import torch.nn as nn
-
 """
 Neural network architectures for PINN model.
 
@@ -9,6 +6,7 @@ that can be used within the proposed framework. The provided
 models include:
 
 - ANN           : standard fully connected feedforward neural network
+- SANN          : ANN with a softplus output, for non-negative outputs
 - MultiHeadANN  : shared-trunk network with multiple output heads
 - Fourier_ANN   : feedforward network with Fourier-feature augmentation
 - RecurrentANN  : recurrent sequence-to-sequence network for state-transition (discrete-time) formulations
@@ -16,6 +14,24 @@ models include:
 These architectures are designed to support flexible experimentation with
 different network structures while maintaining a common PyTorch-based interface.
 """
+
+import numbers
+
+import torch
+import torch.nn as nn
+
+
+def _check_layer_size(layer_size) -> None:
+    """Reject a layer list without input and output sizes, or with bad sizes."""
+    sizes = list(layer_size)
+    if len(sizes) < 2 or not all(
+        isinstance(n, numbers.Integral) and not isinstance(n, bool) and n >= 1
+        for n in sizes
+    ):
+        raise ValueError(
+            "layer_size must list at least the input and output sizes, as "
+            f"positive integers, e.g. [dim_in, 64, dim_out]; received {layer_size!r}."
+        )
 
 
 class ANN(nn.Module):
@@ -45,6 +61,7 @@ class ANN(nn.Module):
 
     def __init__(self, layer_size: list[int], activation: type[nn.Module]):
         super().__init__()
+        _check_layer_size(layer_size)
 
         layers = []
 
@@ -91,6 +108,7 @@ class SANN(nn.Module):
 
     def __init__(self, layer_size: list[int], activation: type[nn.Module]):
         super().__init__()
+        _check_layer_size(layer_size)
 
         layers = []
 
@@ -138,10 +156,18 @@ class MultiHeadANN(nn.Module):
     activation : type[nn.Module]
         PyTorch activation class used after each hidden linear layer.
 
+    return_dict : bool, optional, default=False
+        If False, the head outputs are concatenated, in the order of
+        `head_dims`, into one tensor of shape
+        `(batch_size, sum(head_dims.values()))`, so the model can be trained
+        with `Training` like the other architectures. If True, a dictionary
+        mapping each head name to its output is returned instead (the
+        behaviour of pinnse < 1.0).
+
     Returns
     -------
-    dict[str, torch.Tensor]
-        Dictionary mapping each head name to its predicted output tensor.
+    torch.Tensor or dict[str, torch.Tensor]
+        Concatenated head outputs, or a dictionary of them if `return_dict`.
 
     Notes
     -----
@@ -160,11 +186,17 @@ class MultiHeadANN(nn.Module):
         trunk_layers: list[int],
         head_dims: dict[str, int],
         activation: type[nn.Module],
+        return_dict: bool = False,
     ):
         super().__init__()
+        if not trunk_layers:
+            raise ValueError("trunk_layers must list at least one hidden layer size.")
+        if not head_dims:
+            raise ValueError("head_dims must define at least one output head.")
+        self.return_dict = return_dict
 
         trunk = []
-        dims = [in_dim] + trunk_layers
+        dims = [in_dim] + list(trunk_layers)
         for i in range(len(dims) - 1):
             trunk.append(nn.Linear(dims[i], dims[i + 1]))
             trunk.append(activation())
@@ -191,7 +223,9 @@ class MultiHeadANN(nn.Module):
     def forward(self, x):
         h = self.trunk(x)
         outputs = {name: head(h) for name, head in self.heads.items()}
-        return outputs
+        if self.return_dict:
+            return outputs
+        return torch.cat(list(outputs.values()), dim=-1)
 
 
 class Fourier_ANN(nn.Module):
@@ -241,6 +275,7 @@ class Fourier_ANN(nn.Module):
     ):
         super().__init__()
 
+        _check_layer_size(layer_size)
         self.fourier_levels = fourier_levels
         self.positive_output = positive_output
 
