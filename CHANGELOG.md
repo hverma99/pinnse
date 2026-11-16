@@ -4,7 +4,7 @@ All notable changes to `pinnse` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 11/16/2026
 
 The first stable release. It fixes how checkpoints are selected and how
 collocation points are sampled, makes runs reproducible and resumable, and
