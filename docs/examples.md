@@ -35,3 +35,20 @@ evaluation. The {doc}`quickstart` walks through it step by step.
 | `I_S_data.xlsx` | Labelled input data |
 | `D_S_data.xlsx` | Labelled output data |
 | `run.sh` | Convenience shell script |
+
+## Checking that an example runs
+
+The examples train for tens of thousands of epochs. To check that one still
+runs end to end, without waiting for an accurate model, run its scripts through
+`examples/smoke.py`, which stops every `adam_step` after 5 epochs and every
+`lbfgs_step` after 2 steps (change these with `--epochs` and `--lbfgs-steps`):
+
+```bash
+cd examples/isopfr/efm
+python ../../smoke.py main.py
+python ../../smoke.py check.py
+```
+
+`nox -s examples` does this for every example in a temporary copy of
+`examples/`, running `main.py` and then `check.py`. It skips the flash
+`check.py` scripts, which need Aspen Plus.
