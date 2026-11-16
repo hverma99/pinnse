@@ -263,6 +263,24 @@ class Training(object):
                 self.theta.copy_(ckpt["theta"])
         return ckpt
 
+    def _residual_on(self, kind: str) -> bool:
+        """Whether the "physics" or "boundary" loss has a residual and a non-zero weight."""
+        if kind == "physics":
+            return self.phys_weight != 0 and self.phys_residual is not None
+        return self.bnd_weight != 0 and self.bnd_residual is not None
+
+    def _residual_loss(self, kind: str, x: torch.Tensor) -> torch.Tensor:
+        """
+        Mean squared "physics" or "boundary" residual on the collocation points `x`.
+
+        The points are moved to the device and detached into a leaf that
+        requires gradients, so that a residual may differentiate the network
+        output with respect to its inputs.
+        """
+        residual = self.phys_residual if kind == "physics" else self.bnd_residual
+        x = x.detach().to(self.device).requires_grad_(True)
+        return torch.mean(residual(x, self.model(x)) ** 2)  # type: ignore[misc]
+
     def grad_norm(self, loss):
         if loss is not None:
             g_ = torch.autograd.grad(
@@ -300,33 +318,17 @@ class Training(object):
             y_pred = self.model(x_batch)
             ld = self.loss_fn(y_pred, y_batch)
 
-            if (
-                self.phys_weight != 0
-                and self.phys_residual is not None
-                and self.phys_coll_loader is not None
-            ):
-                x_phys = next(phys_coll_iter)[0].to(self.device).requires_grad_(True)
+            lp, phys_coll_size = None, 0
+            if self._residual_on("physics") and self.phys_coll_loader is not None:
+                x_phys = next(phys_coll_iter)[0]
                 phys_coll_size = x_phys.size(0)
-                y_phys_pred = self.model(x_phys)
-                res_phys = self.phys_residual(x_phys, y_phys_pred)  # type: ignore
-                lp = torch.mean(res_phys**2)
-            else:
-                phys_coll_size = 0
-                lp = None
+                lp = self._residual_loss("physics", x_phys)
 
-            if (
-                self.bnd_weight != 0
-                and self.bnd_residual is not None
-                and self.bnd_coll_loader is not None
-            ):
-                x_bnd = next(bnd_coll_iter)[0].to(self.device).requires_grad_(True)
+            lb, bnd_coll_size = None, 0
+            if self._residual_on("boundary") and self.bnd_coll_loader is not None:
+                x_bnd = next(bnd_coll_iter)[0]
                 bnd_coll_size = x_bnd.size(0)
-                y_bnd_pred = self.model(x_bnd)
-                res_bnd = self.bnd_residual(x_bnd, y_bnd_pred)
-                lb = torch.mean(res_bnd**2)
-            else:
-                bnd_coll_size = 0
-                lb = None
+                lb = self._residual_loss("boundary", x_bnd)
 
             if self.log_grad_norms:
                 grad_d_sum += self.grad_norm(ld).item()
@@ -430,46 +432,23 @@ class Training(object):
                 n_data += batch_size
         avg_data = tot_data_loss / n_data if n_data else 0.0
 
-        tot_phys_loss, n_phys = 0.0, 0
-        if (
-            self.phys_weight != 0
-            and self.phys_residual is not None
-            and len(self.all_phys_colloc_batches) > 0
-        ):
-            sampled_phys_coll_batches = self._colloc_subset(
-                self.all_phys_colloc_batches, "physics", phys_colloc_frac
-            )
-
-            for x_phys_batch in sampled_phys_coll_batches:
-                x_phys = x_phys_batch.to(self.device).requires_grad_(True)
-                phys_coll_size = x_phys.size(0)
-                y_phys = self.model(x_phys)
-                res_phys = self.phys_residual(x_phys, y_phys)
-                lp = torch.mean(res_phys**2)
-                tot_phys_loss += lp.item() * phys_coll_size
-                n_phys += phys_coll_size
-        avg_phys = tot_phys_loss / n_phys if n_phys else 0.0
-
-        tot_bnd_loss, n_bnd = 0.0, 0
-        if (
-            self.bnd_weight != 0
-            and self.bnd_residual is not None
-            and len(self.all_bnd_colloc_batches) > 0
-        ):
-            sampled_bnd_coll_batches = self._colloc_subset(
-                self.all_bnd_colloc_batches, "boundary", bnd_colloc_frac
-            )
-            for x_bnd_batch in sampled_bnd_coll_batches:
-                x_bnd = x_bnd_batch.to(self.device).requires_grad_(True)
-                bnd_coll_size = x_bnd.size(0)
-                y_bnd = self.model(x_bnd)
-                res_bnd = self.bnd_residual(x_bnd, y_bnd)
-                lb = torch.mean(res_bnd**2)
-                tot_bnd_loss += lb.item() * bnd_coll_size
-                n_bnd += bnd_coll_size
-        avg_bnd = tot_bnd_loss / n_bnd if n_bnd else 0.0
-
+        avg_phys = self._colloc_loss(
+            "physics", self.all_phys_colloc_batches, phys_colloc_frac
+        )
+        avg_bnd = self._colloc_loss(
+            "boundary", self.all_bnd_colloc_batches, bnd_colloc_frac
+        )
         return avg_data, avg_phys, avg_bnd
+
+    def _colloc_loss(self, kind: str, batches: list, frac: float) -> float:
+        """Sample-weighted residual loss over the validation subset of `batches`."""
+        if not self._residual_on(kind) or not batches:
+            return 0.0
+        total, n = 0.0, 0
+        for x in self._colloc_subset(batches, kind, frac):
+            total += self._residual_loss(kind, x).item() * x.size(0)
+            n += x.size(0)
+        return total / n
 
     def adam_step(self, epochs: int, val_every: int, verbose: bool = True):
         epochs = _require_positive_int(epochs, "epochs")
@@ -675,12 +654,10 @@ class Training(object):
             "data": mode in ("data", "combined"),
             "physics": mode in ("physics", "combined", "overall physics")
             and len(self.all_phys_colloc_batches) > 0
-            and self.phys_residual is not None
-            and self.phys_weight != 0,
+            and self._residual_on("physics"),
             "boundary": mode in ("boundary", "combined", "overall physics")
             and len(self.all_bnd_colloc_batches) > 0
-            and self.bnd_residual is not None
-            and self.bnd_weight != 0,
+            and self._residual_on("boundary"),
         }
         if not any(active.values()):
             raise ValueError(
@@ -722,73 +699,34 @@ class Training(object):
 
         history_lbfgs = {"loss_t": [], "loss_d": [], "loss_p": [], "loss_b": []}
         best_total = float("inf")
+        weight = {"physics": self.phys_weight, "boundary": self.bnd_weight}
+
+        def terms(with_grad: bool) -> dict:
+            """Active loss terms of the full-batch objective."""
+            out = {}
+            if active["data"]:
+                with torch.set_grad_enabled(with_grad):
+                    out["data"] = self.loss_fn(self.model(self.X_all), self.Y_all)
+            if active["physics"]:
+                out["physics"] = self._residual_loss("physics", self.X_phys_all)
+            if active["boundary"]:
+                out["boundary"] = self._residual_loss("boundary", self.X_bnd_all)
+            return out
 
         def closure():
             self.lbfgs.zero_grad()
             loss = torch.tensor(0.0, device=self.device, requires_grad=True)
-
-            if mode in ("data", "combined"):
-                y_pred = self.model(self.X_all)
-                ld = self.loss_fn(y_pred, self.Y_all)
-                loss = loss + ld
-
-            if (
-                mode in ("physics", "combined", "overall physics")
-                and self.X_phys_all is not None
-                and self.phys_residual is not None
-                and self.phys_weight != 0
-            ):
-                x_phys = self.X_phys_all.detach().clone().requires_grad_(True)
-                y_phys = self.model(x_phys)
-                res_phys = self.phys_residual(x_phys, y_phys)
-                lp = torch.mean(res_phys**2)
-                loss = loss + self.phys_weight * lp
-
-            if (
-                mode in ("boundary", "combined", "overall physics")
-                and self.X_bnd_all is not None
-                and self.bnd_residual is not None
-                and self.bnd_weight != 0
-            ):
-                x_bnd = self.X_bnd_all.detach().clone().requires_grad_(True)
-                y_bnd = self.model(x_bnd)
-                res_bnd = self.bnd_residual(x_bnd, y_bnd)
-                lb = torch.mean(res_bnd**2)
-                loss = loss + self.bnd_weight * lb
-
+            for name, value in terms(with_grad=True).items():
+                loss = loss + (weight[name] * value if name != "data" else value)
             loss.backward()
             return loss
 
         def evaluate_losses():
             self.model.train()
-
-            ld = 0.0
-            if mode in ("data", "combined"):
-                ld = self.loss_fn(self.model(self.X_all), self.Y_all).item()
-
-            lp = 0.0
-            if (
-                mode in ("physics", "combined", "overall physics")
-                and self.X_phys_all is not None
-                and self.phys_residual is not None
-                and self.phys_weight != 0
-            ):
-                x_phys = self.X_phys_all.detach().clone().requires_grad_(True)
-                y_phys = self.model(x_phys)
-                res_phys = self.phys_residual(x_phys, y_phys)
-                lp = torch.mean(res_phys**2).item()
-
-            lb = 0.0
-            if (
-                mode in ("boundary", "combined", "overall physics")
-                and self.X_bnd_all is not None
-                and self.bnd_residual is not None
-                and self.bnd_weight != 0
-            ):
-                x_bnd = self.X_bnd_all.detach().clone().requires_grad_(True)
-                y_bnd = self.model(x_bnd)
-                res_bnd = self.bnd_residual(x_bnd, y_bnd)
-                lb = torch.mean(res_bnd**2).item()
+            values = {k: v.item() for k, v in terms(with_grad=False).items()}
+            ld = values.get("data", 0.0)
+            lp = values.get("physics", 0.0)
+            lb = values.get("boundary", 0.0)
 
             total = 0.0
             if mode in ("data", "combined"):

@@ -5,6 +5,34 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
+# Loss histories of `Training.adam_step`: key -> (legend label, color).
+TRAIN_LOSSES = {
+    "loss_t": ("Total Loss", "black"),
+    "loss_d": ("Data Loss", "blue"),
+    "loss_p": ("Physics Loss", "red"),
+    "loss_b": ("Boundary Loss", "green"),
+}
+VAL_LOSSES = {"val_" + key: value for key, value in TRAIN_LOSSES.items()}
+
+# Figures of `plot_everything`, in drawing order: (method, arguments, file name).
+EVERYTHING = [
+    ("plot_individual_loss", ("loss_t", "Training Total Loss", "black"), "train_loss_total.png"),
+    ("plot_individual_loss", ("loss_d", "Training Data Loss", "blue"), "train_loss_data.png"),
+    ("plot_individual_loss", ("loss_p", "Training Physics Loss", "red"), "train_loss_physics.png"),
+    ("plot_individual_loss", ("loss_b", "Training Boundary Loss", "green"), "train_loss_boundary.png"),
+    ("plot_individual_loss", ("val_loss_t", "Validation Total Loss", "black"), "val_loss_total.png"),
+    ("plot_individual_loss", ("val_loss_d", "Validation Data Loss", "blue"), "val_loss_data.png"),
+    ("plot_individual_loss", ("val_loss_p", "Validation Physics Loss", "red"), "val_loss_physics.png"),
+    ("plot_individual_loss", ("val_loss_b", "Validation Boundary Loss", "green"), "val_loss_boundary.png"),
+    ("plot_all_train_losses", (), "all_train_losses.png"),
+    ("plot_all_val_losses", (), "all_val_losses.png"),
+    ("plot_weights", (), "adaptive_weights.png"),
+    ("plot_gradient_history", ("grad_data_hist", "Gradient Norm (Data)", "blue"), "grad_data.png"),
+    ("plot_gradient_history", ("grad_phys_hist", "Gradient Norm (Physics)", "red"), "grad_phys.png"),
+    ("plot_gradient_history", ("grad_bnd_hist", "Gradient Norm (Boundary)", "green"), "grad_boundary.png"),
+    ("plot_inverse_params", (), "inverse_params"),
+]  # fmt: skip
+
 
 class Plotter:
     def __init__(
@@ -47,6 +75,7 @@ class Plotter:
         self.dpi = dpi
         self.figsize = figsize
 
+    # --------------------------------- helpers ---------------------------------
     @staticmethod
     def _smooth(y, alpha=0.05):
         y = pd.Series(y)
@@ -69,6 +98,35 @@ class Plotter:
     def _val_epochs(self, n):
         return np.arange(self.val_every, self.val_every * n + 1, self.val_every)
 
+    def _epochs_for(self, key, n):
+        return self._val_epochs(n) if key.startswith("val_") else self._train_epochs(n)
+
+    @staticmethod
+    def _xlabel(scale):
+        return "Epoch" if scale is None else f"Epoch (×{scale / 1000}k)"
+
+    def _new_axes(self):
+        return plt.subplots(figsize=self.figsize, dpi=self.dpi)
+
+    def _draw(self, ax, x, y, color, alpha, raw_alpha, width, label=None, log=True):
+        """Draw a raw series (faint) and its exponential moving average."""
+        plot = ax.semilogy if log else ax.plot
+        plot(x, y, linewidth=1.0, alpha=raw_alpha, color=color)
+        plot(x, self._smooth(y, alpha=alpha), linewidth=width, color=color, label=label)
+
+    def _legend(self, ax):
+        ax.legend(
+            frameon=False, prop={"family": self.fontfamily, "size": self.fontsize - 2}
+        )
+
+    @staticmethod
+    def _finish(fig, savepath):
+        """Lay out the figure and, when `savepath` is given, save and close it."""
+        fig.tight_layout()
+        if savepath is not None:
+            fig.savefig(savepath, bbox_inches="tight")
+            plt.close(fig)
+
     def _format_axis(self, ax, xlabel="Epoch", ylabel=None, scale=None):
         if scale is not None:
             ax.xaxis.set_major_formatter(
@@ -90,6 +148,35 @@ class Plotter:
             labelfontfamily=self.fontfamily,
         )
 
+    def _plot_single(
+        self, key, ylabel, color, alpha, scale, savepath, raw_alpha, width
+    ):
+        y = self.history.get(key, [])
+        if not self._has_nonzero_data(y):
+            return
+        fig, ax = self._new_axes()
+        self._draw(ax, self._epochs_for(key, len(y)), y, color, alpha, raw_alpha, width)
+        self._format_axis(ax, xlabel=self._xlabel(scale), ylabel=ylabel, scale=scale)
+        self._finish(fig, savepath)
+
+    def _plot_group(self, series, ylabel, alpha, scale, savepath):
+        present = {
+            key: style
+            for key, style in series.items()
+            if self._has_nonzero_data(self.history.get(key, []))
+        }
+        if not present:
+            return
+        fig, ax = self._new_axes()
+        for key, (label, color) in present.items():
+            y = self.history[key]
+            x = self._epochs_for(key, len(y))
+            self._draw(ax, x, y, color, alpha, 0.25, 2, label=label)
+        self._format_axis(ax, xlabel=self._xlabel(scale), ylabel=ylabel, scale=scale)
+        self._legend(ax)
+        self._finish(fig, savepath)
+
+    # ------------------------------ public plots -------------------------------
     def plot_individual_loss(
         self,
         key: str,
@@ -100,34 +187,7 @@ class Plotter:
         savepath: str | None = None,
     ):
         """Plot one loss history"""
-        y = self.history.get(key, [])
-        if not self._has_nonzero_data(y):
-            return
-
-        x = (
-            self._val_epochs(len(y))
-            if key.startswith("val_")
-            else self._train_epochs(len(y))
-        )
-        y_s = self._smooth(y, alpha=alpha)
-
-        fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
-
-        ax.semilogy(x, y, linewidth=1.0, alpha=0.25, color=color)
-        ax.semilogy(x, y_s, linewidth=2, color=color)
-
-        self._format_axis(
-            ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
-            ylabel=ylabel,
-            scale=scale,
-        )
-
-        plt.tight_layout()
-
-        if savepath is not None:
-            plt.savefig(savepath, bbox_inches="tight")
-            plt.close(fig)
+        self._plot_single(key, ylabel, color, alpha, scale, savepath, 0.25, 2)
 
     def plot_all_train_losses(
         self,
@@ -138,44 +198,7 @@ class Plotter:
         """
         Plot all training losses.
         """
-        train_map = {
-            "loss_t": ("Total Loss", "black"),
-            "loss_d": ("Data Loss", "blue"),
-            "loss_p": ("Physics Loss", "red"),
-            "loss_b": ("Boundary Loss", "green"),
-        }
-
-        has_any = any(
-            self._has_nonzero_data(self.history.get(key, [])) for key in train_map
-        )
-        if not has_any:
-            return
-
-        fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
-
-        for key, (label, color) in train_map.items():
-            y = self.history.get(key, [])
-            if not self._has_nonzero_data(y):
-                continue
-            x = self._train_epochs(len(y))
-            y_s = self._smooth(y, alpha=alpha)
-            ax.semilogy(x, y, linewidth=1.0, alpha=0.25, color=color)
-            ax.semilogy(x, y_s, linewidth=2, color=color, label=label)
-
-        self._format_axis(
-            ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
-            ylabel="Training Loss",
-            scale=scale,
-        )
-        ax.legend(
-            frameon=False, prop={"family": self.fontfamily, "size": self.fontsize - 2}
-        )
-        plt.tight_layout()
-
-        if savepath is not None:
-            plt.savefig(savepath, bbox_inches="tight")
-            plt.close(fig)
+        self._plot_group(TRAIN_LOSSES, "Training Loss", alpha, scale, savepath)
 
     def plot_all_val_losses(
         self,
@@ -186,44 +209,7 @@ class Plotter:
         """
         Plot all validation losses.
         """
-        val_map = {
-            "val_loss_t": ("Total Loss", "black"),
-            "val_loss_d": ("Data Loss", "blue"),
-            "val_loss_p": ("Physics Loss", "red"),
-            "val_loss_b": ("Boundary Loss", "green"),
-        }
-
-        has_any = any(
-            self._has_nonzero_data(self.history.get(key, [])) for key in val_map
-        )
-        if not has_any:
-            return
-
-        fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
-
-        for key, (label, color) in val_map.items():
-            y = self.history.get(key, [])
-            if not self._has_nonzero_data(y):
-                continue
-            x = self._val_epochs(len(y))
-            y_s = self._smooth(y, alpha=alpha)
-            ax.semilogy(x, y, linewidth=1.0, alpha=0.25, color=color)
-            ax.semilogy(x, y_s, linewidth=2, color=color, label=label)
-
-        self._format_axis(
-            ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
-            ylabel="Validation Loss",
-            scale=scale,
-        )
-        ax.legend(
-            frameon=False, prop={"family": self.fontfamily, "size": self.fontsize - 2}
-        )
-        plt.tight_layout()
-
-        if savepath is not None:
-            plt.savefig(savepath, bbox_inches="tight")
-            plt.close(fig)
+        self._plot_group(VAL_LOSSES, "Validation Loss", alpha, scale, savepath)
 
     def plot_weights(
         self,
@@ -234,64 +220,37 @@ class Plotter:
         """
         Plot adaptive physics and boundary weights on dual y-axes.
         """
-        wt_phys = self.history.get("wt_phys", [])
-        wt_bnd = self.history.get("wt_bnd", [])
-
-        if not self._has_nonzero_data(wt_phys) and not self._has_nonzero_data(wt_bnd):
+        weights = [
+            ("wt_phys", r"Adaptive Physics Weight ($\lambda_P$)", "firebrick", "left"),
+            ("wt_bnd", r"Adaptive Boundary Weight ($\lambda_B$)", "teal", "right"),
+        ]
+        if not any(
+            self._has_nonzero_data(self.history.get(k, [])) for k, *_ in weights
+        ):
             return
 
-        fig, ax1 = plt.subplots(figsize=self.figsize, dpi=self.dpi)
+        fig, ax1 = self._new_axes()
         ax2 = ax1.twinx()
 
-        if self._has_nonzero_data(wt_phys):
-            x1 = self._train_epochs(len(wt_phys))
-            smooth_phys = self._smooth(wt_phys, alpha=alpha)
-            ax1.plot(x1, wt_phys, alpha=0.5, linewidth=1.5, color="firebrick")
-            ax1.plot(x1, smooth_phys, linewidth=2.0, color="firebrick")
-            ax1.set_ylabel(
-                r"Adaptive Physics Weight ($\lambda_P$)",
-                fontsize=self.fontsize,
-                fontfamily=self.fontfamily,
-            )
-            ax1.spines["left"].set_color("firebrick")
-            ax1.yaxis.label.set_color("firebrick")
-            ax1.tick_params(
+        for ax, (key, ylabel, color, side) in zip((ax1, ax2), weights):
+            y = self.history.get(key, [])
+            if not self._has_nonzero_data(y):
+                continue
+            x = self._train_epochs(len(y))
+            ax.plot(x, y, alpha=0.5, linewidth=1.5, color=color)
+            ax.plot(x, self._smooth(y, alpha=alpha), linewidth=2.0, color=color)
+            ax.set_ylabel(ylabel, fontsize=self.fontsize, fontfamily=self.fontfamily)
+            ax.spines[side].set_color(color)
+            ax.yaxis.label.set_color(color)
+            ax.tick_params(
                 axis="y",
-                colors="firebrick",
+                colors=color,
                 labelsize=self.fontsize,
                 labelfontfamily=self.fontfamily,
             )
 
-        if self._has_nonzero_data(wt_bnd):
-            x2 = self._train_epochs(len(wt_bnd))
-            smooth_bnd = self._smooth(wt_bnd, alpha=alpha)
-            ax2.plot(x2, wt_bnd, alpha=0.5, linewidth=1.5, color="teal")
-            ax2.plot(x2, smooth_bnd, linewidth=2.0, color="teal")
-            ax2.set_ylabel(
-                r"Adaptive Boundary Weight ($\lambda_B$)",
-                fontsize=self.fontsize,
-                fontfamily=self.fontfamily,
-            )
-            ax2.spines["right"].set_color("teal")
-            ax2.yaxis.label.set_color("teal")
-            ax2.tick_params(
-                axis="y",
-                colors="teal",
-                labelsize=self.fontsize,
-                labelfontfamily=self.fontfamily,
-            )
-
-        self._format_axis(
-            ax1,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
-            ylabel=None,
-            scale=scale,
-        )
-        plt.tight_layout()
-
-        if savepath is not None:
-            plt.savefig(savepath, bbox_inches="tight")
-            plt.close(fig)
+        self._format_axis(ax1, xlabel=self._xlabel(scale), ylabel=None, scale=scale)
+        self._finish(fig, savepath)
 
     def plot_gradient_history(
         self,
@@ -305,28 +264,7 @@ class Plotter:
         """
         Plot gradient-norm history.
         """
-        y = self.history.get(key, [])
-        if not self._has_nonzero_data(y):
-            return
-
-        x = self._train_epochs(len(y))
-        y_s = self._smooth(y, alpha=alpha)
-
-        fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
-        ax.semilogy(x, y, linewidth=1.0, alpha=0.2, color=color)
-        ax.semilogy(x, y_s, linewidth=1.8, color=color)
-
-        self._format_axis(
-            ax,
-            xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
-            ylabel=ylabel,
-            scale=scale,
-        )
-        plt.tight_layout()
-
-        if savepath is not None:
-            plt.savefig(savepath, bbox_inches="tight")
-            plt.close(fig)
+        self._plot_single(key, ylabel, color, alpha, scale, savepath, 0.2, 1.8)
 
     def plot_inverse_params(
         self,
@@ -354,27 +292,21 @@ class Plotter:
             y = inv_param[:, j]
             if not self._has_nonzero_data(y):
                 continue
-            y_s = self._smooth(y, alpha=alpha)
 
-            fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
-            ax.plot(x, y, linewidth=1.0, alpha=0.2, color="purple")
-            ax.plot(x, y_s, linewidth=1.8, color="purple")
-
+            fig, ax = self._new_axes()
+            self._draw(ax, x, y, "purple", alpha, 0.2, 1.8, log=False)
             self._format_axis(
                 ax,
-                xlabel="Epoch" if scale is None else f"Epoch (×{scale / 1000}k)",
+                xlabel=self._xlabel(scale),
                 ylabel=f"Inverse Parameter {j + 1}",
                 scale=scale,
             )
-            plt.tight_layout()
 
+            path = None
             if savepath is not None:
                 os.makedirs(savepath, exist_ok=True)
-                plt.savefig(
-                    os.path.join(savepath, f"inv_param_{j + 1}.png"),
-                    bbox_inches="tight",
-                )
-                plt.close(fig)
+                path = os.path.join(savepath, f"inv_param_{j + 1}.png")
+            self._finish(fig, path)
 
     def plot_everything(self, savepath: str | None = None, scale: float | None = None):
         """
@@ -383,160 +315,6 @@ class Plotter:
         if savepath is not None:
             os.makedirs(savepath, exist_ok=True)
 
-        # Individual training losses
-        self.plot_individual_loss(
-            "loss_t",
-            ylabel="Training Total Loss",
-            color="black",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "train_loss_total.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "loss_d",
-            ylabel="Training Data Loss",
-            color="blue",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "train_loss_data.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "loss_p",
-            ylabel="Training Physics Loss",
-            color="red",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "train_loss_physics.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "loss_b",
-            ylabel="Training Boundary Loss",
-            color="green",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "train_loss_boundary.png")
-            ),
-        )
-
-        # Individual validation losses
-        self.plot_individual_loss(
-            "val_loss_t",
-            ylabel="Validation Total Loss",
-            color="black",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "val_loss_total.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "val_loss_d",
-            ylabel="Validation Data Loss",
-            color="blue",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "val_loss_data.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "val_loss_p",
-            ylabel="Validation Physics Loss",
-            color="red",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "val_loss_physics.png")
-            ),
-        )
-        self.plot_individual_loss(
-            "val_loss_b",
-            ylabel="Validation Boundary Loss",
-            color="green",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "val_loss_boundary.png")
-            ),
-        )
-
-        self.plot_all_train_losses(
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "all_train_losses.png")
-            ),
-        )
-        self.plot_all_val_losses(
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "all_val_losses.png")
-            ),
-        )
-
-        # Adaptive weights
-        self.plot_weights(
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "adaptive_weights.png")
-            ),
-        )
-
-        # Gradients
-        self.plot_gradient_history(
-            "grad_data_hist",
-            ylabel="Gradient Norm (Data)",
-            color="blue",
-            scale=scale,
-            savepath=(
-                None if savepath is None else os.path.join(savepath, "grad_data.png")
-            ),
-        )
-        self.plot_gradient_history(
-            "grad_phys_hist",
-            ylabel="Gradient Norm (Physics)",
-            color="red",
-            scale=scale,
-            savepath=(
-                None if savepath is None else os.path.join(savepath, "grad_phys.png")
-            ),
-        )
-        self.plot_gradient_history(
-            "grad_bnd_hist",
-            ylabel="Gradient Norm (Boundary)",
-            color="green",
-            scale=scale,
-            savepath=(
-                None
-                if savepath is None
-                else os.path.join(savepath, "grad_boundary.png")
-            ),
-        )
-
-        # Inverse parameters
-        self.plot_inverse_params(
-            scale=scale,
-            savepath=(
-                None if savepath is None else os.path.join(savepath, "inverse_params")
-            ),
-        )
+        for method, args, filename in EVERYTHING:
+            path = None if savepath is None else os.path.join(savepath, filename)
+            getattr(self, method)(*args, scale=scale, savepath=path)

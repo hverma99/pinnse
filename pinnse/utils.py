@@ -132,6 +132,63 @@ class Normalization:
             norm_metrics[col] = {"min": float(cmin), "max": float(cmax)}
 
     @staticmethod
+    def centered(
+        I_S_data: pd.DataFrame,
+        D_S_data: pd.DataFrame,
+        I_S_cols: list[str] | None = None,
+        D_S_cols: list[str] | None = None,
+        shared_groups: list[tuple[list[str], list[str]]] | None = None,
+    ):
+        """
+        Centered min-max normalization to [-1, 1] of an input/output dataset pair.
+
+        Inputs
+        ------
+        I_S_data, D_S_data : pd.DataFrame
+            Input-space and output-space datasets.
+        I_S_cols, D_S_cols : list[str], optional
+            Columns of each dataset scaled individually, each with its own
+            minimum and maximum.
+        shared_groups : list[tuple[list[str], list[str]]], optional
+            Groups `(input_cols, output_cols)` scaled with one minimum and
+            maximum shared by every column of the group, across both datasets,
+            e.g. inlet and outlet flowrates, so that they stay comparable.
+
+        Returns
+        -------
+        norm_I_S_data, norm_D_S_data : pd.DataFrame
+            Normalized datasets; columns not listed are left unchanged.
+        norm_I_S_metrics, norm_D_S_metrics : dict
+            ``{column: {"min": ..., "max": ...}}`` for every scaled column,
+            as used by `Denormalization.min_max_pfr`.
+        """
+        norm_I_S_data, norm_D_S_data = I_S_data.copy(), D_S_data.copy()
+        norm_I_S_metrics: dict = {}
+        norm_D_S_metrics: dict = {}
+
+        for in_cols, ot_cols in shared_groups or []:
+            vals = [I_S_data[in_cols], D_S_data[ot_cols]]
+            vals = [v.to_numpy(dtype=np.float64).ravel() for v in vals if v.size]
+            if not vals:
+                continue
+            group = np.concatenate(vals)
+            gmin, gmax = group.min(), group.max()
+            Normalization.apply_global(
+                I_S_data, norm_I_S_data, norm_I_S_metrics, in_cols, gmin, gmax
+            )
+            Normalization.apply_global(
+                D_S_data, norm_D_S_data, norm_D_S_metrics, ot_cols, gmin, gmax
+            )
+
+        Normalization.apply_local(
+            I_S_data, norm_I_S_data, norm_I_S_metrics, list(I_S_cols or [])
+        )
+        Normalization.apply_local(
+            D_S_data, norm_D_S_data, norm_D_S_metrics, list(D_S_cols or [])
+        )
+        return norm_I_S_data, norm_D_S_data, norm_I_S_metrics, norm_D_S_metrics
+
+    @staticmethod
     def min_max_pfr(
         I_S_data: pd.DataFrame,
         D_S_data: pd.DataFrame,
@@ -168,81 +225,28 @@ class Normalization:
         """
         formulation = formulation.upper()
 
-        norm_I_S_data = I_S_data.copy()
-        norm_D_S_data = D_S_data.copy()
-        norm_I_S_metrics = {}
-        norm_D_S_metrics = {}
+        def present(names, data):
+            return [name for name in names if name in data.columns]
 
-        common_I_S_cols = [col for col in ["P", "T", "V"] if col in I_S_data.columns]
+        common = present(["P", "T", "V"], I_S_data)
+        in_cols = present([f"F_in_{sp}" for sp in species], I_S_data)
+        reactions = range(1, N_reaction + 1)
 
         if formulation == "EFM":
-            in_cols = [
-                f"F_in_{sp}" for sp in species if f"F_in_{sp}" in I_S_data.columns
-            ]
-            ot_cols = [
-                f"F_ot_{sp}" for sp in species if f"F_ot_{sp}" in D_S_data.columns
-            ]
-
-            flow_vals = []
-            if in_cols:
-                flow_vals.append(I_S_data[in_cols].to_numpy(dtype=np.float64).ravel())
-            if ot_cols:
-                flow_vals.append(D_S_data[ot_cols].to_numpy(dtype=np.float64).ravel())
-
-            if flow_vals:
-                all_flow = np.concatenate(flow_vals)
-                gmin, gmax = all_flow.min(), all_flow.max()
-                Normalization.apply_global(
-                    I_S_data, norm_I_S_data, norm_I_S_metrics, in_cols, gmin, gmax
-                )
-                Normalization.apply_global(
-                    D_S_data, norm_D_S_data, norm_D_S_metrics, ot_cols, gmin, gmax
-                )
-
-            Normalization.apply_local(
-                I_S_data, norm_I_S_data, norm_I_S_metrics, common_I_S_cols
+            # inlet and outlet flowrates share one scale
+            ot_cols = present([f"F_ot_{sp}" for sp in species], D_S_data)
+            return Normalization.centered(
+                I_S_data, D_S_data, common, [], shared_groups=[(in_cols, ot_cols)]
             )
-
-        elif formulation == "ERM":
-            in_cols = [
-                f"F_in_{sp}" for sp in species if f"F_in_{sp}" in I_S_data.columns
-            ]
-            E_cols = [
-                f"E_R{j + 1}"
-                for j in range(N_reaction)
-                if f"E_R{j + 1}" in D_S_data.columns
-            ]
-
-            Normalization.apply_global(
-                I_S_data, norm_I_S_data, norm_I_S_metrics, in_cols
+        if formulation == "ERM":
+            E_cols = present([f"E_R{j}" for j in reactions], D_S_data)
+            return Normalization.centered(
+                I_S_data, D_S_data, common, E_cols, shared_groups=[(in_cols, [])]
             )
-            Normalization.apply_local(
-                I_S_data, norm_I_S_data, norm_I_S_metrics, common_I_S_cols
-            )
-            Normalization.apply_local(D_S_data, norm_D_S_data, norm_D_S_metrics, E_cols)
-
-        elif formulation == "CM":
-            in_cols = [
-                f"F_in_{sp}" for sp in species if f"F_in_{sp}" in I_S_data.columns
-            ]
-            X_cols = [
-                f"X_R{j + 1}"
-                for j in range(N_reaction)
-                if f"X_R{j + 1}" in D_S_data.columns
-            ]
-
-            Normalization.apply_local(
-                I_S_data, norm_I_S_data, norm_I_S_metrics, in_cols
-            )
-            Normalization.apply_local(
-                I_S_data, norm_I_S_data, norm_I_S_metrics, common_I_S_cols
-            )
-            Normalization.apply_local(D_S_data, norm_D_S_data, norm_D_S_metrics, X_cols)
-
-        else:
-            raise ValueError("formulation must be one of: 'EFM', 'ERM', 'CM'")
-
-        return norm_I_S_data, norm_D_S_data, norm_I_S_metrics, norm_D_S_metrics
+        if formulation == "CM":
+            X_cols = present([f"X_R{j}" for j in reactions], D_S_data)
+            return Normalization.centered(I_S_data, D_S_data, in_cols + common, X_cols)
+        raise ValueError("formulation must be one of: 'EFM', 'ERM', 'CM'")
 
     @staticmethod
     def scale_centered_defined_metrics(I_S: pd.DataFrame, I_S_metrics: dict):
@@ -717,6 +721,31 @@ class Analyze:
         return pd.DataFrame(rows)
 
 
+def _history_frames(history: dict):
+    """
+    Yield `(key, DataFrame)` for every non-None item of a training history.
+
+    One-dimensional items become a single column, two-dimensional items (e.g.
+    the inverse-parameter history) one column per component, and anything
+    else a single object column.
+    """
+    for key, value in history.items():
+        if value is None:
+            continue
+        arr = np.asarray(value)
+        if arr.ndim == 1:
+            yield key, pd.DataFrame({key: value})
+        elif arr.ndim == 2:
+            yield (
+                key,
+                pd.DataFrame(
+                    arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
+                ),
+            )
+        else:
+            yield key, pd.DataFrame({key: pd.Series(value, dtype=object)})
+
+
 class Save:
     @staticmethod
     def excel(
@@ -743,19 +772,7 @@ class Save:
         filepath = os.path.join(foldername, filename)
 
         with pd.ExcelWriter(filepath) as writer:
-            for key, value in history.items():
-                if value is None:
-                    continue
-                arr = np.asarray(value)
-                if arr.ndim == 1:
-                    df = pd.DataFrame({key: value})
-                elif arr.ndim == 2:
-                    df = pd.DataFrame(
-                        arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
-                    )
-                else:
-                    df = pd.DataFrame({key: pd.Series(value, dtype=object)})
-
+            for key, df in _history_frames(history):
                 df.to_excel(writer, sheet_name=key[:31], index=False)
         print(f"Saved training history XLSX files to folder: {filepath}")
 
@@ -780,21 +797,7 @@ class Save:
         """
         foldername = os.path.join(foldername, filename)
         os.makedirs(foldername, exist_ok=True)
-        for key, value in history.items():
-            if value is None:
-                continue
-
-            arr = np.asarray(value)
-
-            if arr.ndim == 1:
-                df = pd.DataFrame({key: value})
-            elif arr.ndim == 2:
-                df = pd.DataFrame(
-                    arr, columns=[f"{key}_{j + 1}" for j in range(arr.shape[1])]
-                )
-            else:
-                df = pd.DataFrame({key: pd.Series(value, dtype=object)})
-
+        for key, df in _history_frames(history):
             df.to_csv(os.path.join(foldername, f"{key}.csv"), index=False)
 
         print(f"Saved training history CSV files to folder: {foldername}")

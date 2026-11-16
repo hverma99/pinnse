@@ -34,6 +34,31 @@ def _check_layer_size(layer_size) -> None:
         )
 
 
+def _mlp(
+    sizes: list[int], activation: type[nn.Module], final_activation: bool = False
+) -> nn.Sequential:
+    """
+    Fully connected stack ``Linear(sizes[0], sizes[1]), activation, ...``.
+
+    An activation follows every linear layer except the last one, unless
+    `final_activation` is True.
+    """
+    layers: list[nn.Module] = []
+    for i in range(len(sizes) - 1):
+        layers.append(nn.Linear(sizes[i], sizes[i + 1]))
+        if final_activation or i < len(sizes) - 2:
+            layers.append(activation())
+    return nn.Sequential(*layers)
+
+
+def _xavier_init(module: nn.Module) -> None:
+    """Xavier-uniform weights and zero biases for every linear layer of `module`."""
+    for m in module.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+
+
 class ANN(nn.Module):
     """
     Standard fully connected feedforward neural network.
@@ -62,26 +87,14 @@ class ANN(nn.Module):
     def __init__(self, layer_size: list[int], activation: type[nn.Module]):
         super().__init__()
         _check_layer_size(layer_size)
-
-        layers = []
-
-        for i in range(len(layer_size) - 2):
-            layers.append(nn.Linear(layer_size[i], layer_size[i + 1]))
-            layers.append(activation())
-
-        layers.append(nn.Linear(layer_size[-2], layer_size[-1]))
-        self.net = nn.Sequential(*layers)
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+        self.net = _mlp(list(layer_size), activation)
+        _xavier_init(self)
 
     def forward(self, x):
         return self.net(x)
 
 
-class SANN(nn.Module):
+class SANN(ANN):
     """
     Standard fully connected feedforward neural network with softplus output activation.
 
@@ -107,27 +120,11 @@ class SANN(nn.Module):
     """
 
     def __init__(self, layer_size: list[int], activation: type[nn.Module]):
-        super().__init__()
-        _check_layer_size(layer_size)
-
-        layers = []
-
-        for i in range(len(layer_size) - 2):
-            layers.append(nn.Linear(layer_size[i], layer_size[i + 1]))
-            layers.append(activation())
-
-        layers.append(nn.Linear(layer_size[-2], layer_size[-1]))
-        self.net = nn.Sequential(*layers)
+        super().__init__(layer_size, activation)
         self.softplus = nn.Softplus()
 
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
-
     def forward(self, x):
-        raw_output = self.net(x)
-        return self.softplus(raw_output)
+        return self.softplus(self.net(x))
 
 
 class MultiHeadANN(nn.Module):
@@ -195,30 +192,16 @@ class MultiHeadANN(nn.Module):
             raise ValueError("head_dims must define at least one output head.")
         self.return_dict = return_dict
 
-        trunk = []
-        dims = [in_dim] + list(trunk_layers)
-        for i in range(len(dims) - 1):
-            trunk.append(nn.Linear(dims[i], dims[i + 1]))
-            trunk.append(activation())
-        self.trunk = nn.Sequential(*trunk)
+        self.trunk = _mlp([in_dim, *trunk_layers], activation, final_activation=True)
 
         hidden_dim = trunk_layers[-1]
-
         self.heads = nn.ModuleDict(
             {
-                name: nn.Sequential(
-                    nn.Linear(hidden_dim, hidden_dim),
-                    activation(),
-                    nn.Linear(hidden_dim, out_dim),
-                )
+                name: _mlp([hidden_dim, hidden_dim, out_dim], activation)
                 for name, out_dim in head_dims.items()
             }
         )
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+        _xavier_init(self)
 
     def forward(self, x):
         h = self.trunk(x)
@@ -280,25 +263,15 @@ class Fourier_ANN(nn.Module):
         self.positive_output = positive_output
 
         d_in = layer_size[0]
-        net_layer_size = layer_size.copy()
+        net_layer_size = list(layer_size)
 
         if self.fourier_levels > 0:
             extra = 2 * self.fourier_levels
             net_layer_size[0] = (d_in - 1) + extra
 
-        layers = []
-        for i in range(len(net_layer_size) - 2):
-            layers.append(nn.Linear(net_layer_size[i], net_layer_size[i + 1]))
-            layers.append(activation())
-        layers.append(nn.Linear(net_layer_size[-2], net_layer_size[-1]))
-
-        self.net = nn.Sequential(*layers)
+        self.net = _mlp(net_layer_size, activation)
         self.softplus = nn.Softplus()
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+        _xavier_init(self)
 
     def forward(self, x):
         if self.fourier_levels > 0:
@@ -396,18 +369,8 @@ class RecurrentANN(nn.Module):
             batch_first=True,
         )
 
-        dims = [hidden_dim] + list(head_layers or [])
-        head = []
-        for i in range(len(dims) - 1):
-            head.append(nn.Linear(dims[i], dims[i + 1]))
-            head.append(activation())
-        head.append(nn.Linear(dims[-1], out_dim))
-        self.head = nn.Sequential(*head)
-
-        for m in self.head.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+        self.head = _mlp([hidden_dim, *(head_layers or []), out_dim], activation)
+        _xavier_init(self.head)
 
     def forward(self, x):
         if x.dim() != 3:

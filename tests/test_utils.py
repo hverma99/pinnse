@@ -472,6 +472,23 @@ def test_gaussian_rejects_unknown_mode(measurements):
         Noise.gaussian(measurements, 0.1, mode="uniform")
 
 
+def test_centered_shared_groups_and_individual_columns():
+    I_S = pd.DataFrame({"a": [0.0, 10.0], "b": [5.0, 6.0], "keep": [7.0, 8.0]})
+    D_S = pd.DataFrame({"c": [2.0, 20.0], "d": [1.0, 3.0]})
+    nI, nD, mI, mD = Normalization.centered(
+        I_S, D_S, I_S_cols=["b"], D_S_cols=["d"], shared_groups=[(["a"], ["c"])]
+    )
+    # "a" and "c" share the range [0, 20]; "b" and "d" use their own
+    np.testing.assert_allclose(nI["a"], [-1.0, 0.0])
+    np.testing.assert_allclose(nD["c"], [-0.8, 1.0], rtol=1e-6)
+    np.testing.assert_allclose(nI["b"], [-1.0, 1.0])
+    np.testing.assert_allclose(nD["d"], [-1.0, 1.0])
+    assert nI["keep"].tolist() == [7.0, 8.0] and "keep" not in mI
+    assert mI["a"] == mD["c"] == {"min": 0.0, "max": 20.0}
+    # an empty shared group is ignored
+    assert Normalization.centered(I_S, D_S, shared_groups=[([], [])])[2] == {}
+
+
 def test_max_abs_maps_an_all_zero_column_to_zero():
     frame = pd.DataFrame({"z": [0.0, 0.0, 0.0], "b": [1.0, -2.0, 4.0]})
     norm, metrics = Normalization.max_abs(frame)
