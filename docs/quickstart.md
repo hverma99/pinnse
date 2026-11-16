@@ -77,7 +77,7 @@ data = DataModule(
     physics_coll_data_size=20000,  # Number of collocation points
     physics_coll_batch_size=500,
     boundary_coll_data_size=5000,
-    boundry_coll_batch_size=1000,
+    boundary_coll_batch_size=1000,
     test_frac=0.1,
     val_frac=0.1,
 )
@@ -112,9 +112,8 @@ nu = np.array(  # stoichiometric coefficients, one row per reaction
 )
 key_species = ["C6H6", "C6H6", "C4H2O3"]
 k = np.array([7.7e6, 6.31e7, 2.33e4], dtype=np.float32)  # pre-exponential factors, 1/s
-E = (
-    np.array([105.2, 124.89, 89.66], dtype=np.float32) * 1e3
-)  # activation energies, J/mol
+# activation energies, J/mol
+E = np.array([105.2, 124.89, 89.66], dtype=np.float32) * 1e3
 
 physics = Physics(I_S_metrics, D_S_metrics, species, nu, key_species, k, E)
 boundary = Boundary(species)
@@ -165,7 +164,7 @@ For problems that benefit from second-order optimization, append an L-BFGS
 refinement stage:
 
 ```python
-history_lbfgs = training.lbfgs_step(mode="combined", N_LBFGS=150)
+history_lbfgs = training.lbfgs_step(mode="combined", n_steps=150)
 ```
 
 ### Step 6: Save and visualize

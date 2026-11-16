@@ -220,23 +220,23 @@ def test_mean_norm_round_trip(frame):
     norm, metrics = Normalization.mean_norm(frame)
     np.testing.assert_allclose(norm.mean(), 0, atol=1e-12)
     assert metrics["a"] == {"max": 9.0, "min": 1.0, "mean": 4.0}
-    pd.testing.assert_frame_equal(Denormalization.mean_abs(norm, metrics), frame)
+    pd.testing.assert_frame_equal(Denormalization.mean_norm(norm, metrics), frame)
 
     norm, metrics = Normalization.mean_norm(frame, normalize_cols=["c"])
-    pd.testing.assert_frame_equal(Denormalization.mean_abs(norm, metrics), frame)
+    pd.testing.assert_frame_equal(Denormalization.mean_norm(norm, metrics), frame)
 
 
 def test_z_score_round_trip(frame):
     norm, metrics = Normalization.z_score(frame)
     np.testing.assert_allclose(norm.mean(), 0, atol=1e-12)
     np.testing.assert_allclose(norm.std(), 1)
-    pd.testing.assert_frame_equal(Denormalization.z_norm(norm, metrics), frame)
+    pd.testing.assert_frame_equal(Denormalization.z_score(norm, metrics), frame)
 
     norm, metrics = Normalization.z_score(frame, normalize_cols=["b"])
-    pd.testing.assert_frame_equal(Denormalization.z_norm(norm, metrics), frame)
+    pd.testing.assert_frame_equal(Denormalization.z_score(norm, metrics), frame)
 
 
-@pytest.mark.parametrize("fn", ["min_max", "max_abs", "mean_abs", "z_norm"])
+@pytest.mark.parametrize("fn", ["min_max", "max_abs", "mean_norm", "z_score"])
 def test_denormalization_without_metrics_returns_copy(frame, fn):
     out = getattr(Denormalization, fn)(frame, {})
     pd.testing.assert_frame_equal(out, frame)

@@ -227,7 +227,7 @@ data = DataModule(
     physics_coll_data_size=20000,  # Number of collocation points
     physics_coll_batch_size=500,
     boundary_coll_data_size=5000,
-    boundry_coll_batch_size=1000,
+    boundary_coll_batch_size=1000,
     test_frac=0.1,
     val_frac=0.1,
 )
@@ -290,7 +290,7 @@ history = training.adam_step(epochs=75000, val_every=100)
 For problems that benefit from second-order optimization, append an L-BFGS refinement stage:
 
 ```python
-history_lbfgs = training.lbfgs_step(mode="combined", N_LBFGS=150)
+history_lbfgs = training.lbfgs_step(mode="combined", n_steps=150)
 ```
 
 ### Step 6: Save and visualize
@@ -316,7 +316,7 @@ from pinnse import (
     ANN,
     SANN,
     MultiHeadANN,
-    Fourier_ANN,  # Feedforward architectures
+    FourierANN,  # Feedforward architectures
     RecurrentANN,  # Sequence architecture
     DataModule,
     SequenceDataModule,  # Data loading
@@ -338,7 +338,7 @@ from pinnse import (
 | `ANN` | Fully connected feedforward network. Xavier-uniform weight init, zero biases. | General-purpose PINN surrogate. Default choice. |
 | `SANN` | Same as `ANN` but applies `Softplus` to the output layer. | When outputs must be non-negative (concentrations, flowrates). |
 | `MultiHeadANN` | Shared trunk with multiple independent output heads. | When outputs group naturally (e.g., compositions vs. temperature) and benefit from shared representation with separate specialization. |
-| `Fourier_ANN` | Feedforward network with sinusoidal Fourier-feature embedding on the last input coordinate. | When the target function varies rapidly or has multi-scale behavior along one input dimension (e.g., reactor length). |
+| `FourierANN` | Feedforward network with sinusoidal Fourier-feature embedding on the last input coordinate. | When the target function varies rapidly or has multi-scale behavior along one input dimension (e.g., reactor length). |
 | `RecurrentANN` | Recurrent sequence-to-sequence network (`cell="rnn"`, `"gru"` or `"lstm"`; stacked with `n_layers`) with an output head applied at each time step (`head_layers`). Maps inputs of shape `(batch, seq_len, in_dim)` to outputs of shape `(batch, seq_len, out_dim)`. | Dynamic processes, where the surrogate predicts a whole state trajectory from an initial condition and an input schedule. Use with `SequenceDataModule`. |
 
 `RecurrentANN` starts from a zero hidden state, so the initial condition must be supplied as input features (typically held constant along the sequence). Its forward pass takes a single tensor, so it works in the same `Training` loop as the feedforward networks.
@@ -398,7 +398,7 @@ The `Training` class manages the full training loop.
 | Method | Purpose |
 |---|---|
 | `adam_step(epochs, val_every)` | First-order training with Adam. Validates periodically and checkpoints the best model. |
-| `lbfgs_step(mode, N_LBFGS)` | Second-order refinement with L-BFGS (full-batch, strong Wolfe line search). Modes: `"data"`, `"physics"`, `"boundary"`, `"combined"`, `"overall physics"`. |
+| `lbfgs_step(mode, n_steps)` | Second-order refinement with L-BFGS (full-batch, strong Wolfe line search). Modes: `"data"`, `"physics"`, `"boundary"`, `"combined"`, `"overall physics"`. |
 | `validate_test(loader)` | Evaluate data, physics, and boundary losses on a given loader. |
 
 Key constructor parameters:

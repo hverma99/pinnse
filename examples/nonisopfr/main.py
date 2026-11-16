@@ -35,7 +35,7 @@ def main():
         physics_coll_data_size=N_C_P,
         physics_coll_batch_size=B_C_P,
         boundary_coll_data_size=N_C_B,
-        boundry_coll_batch_size=B_C_B,
+        boundary_coll_batch_size=B_C_B,
         test_frac=0.1,
         val_frac=0.1,
     )
@@ -89,7 +89,7 @@ def main():
     )
 
     history_adam = training.adam_step(epochs=75000, val_every=100, verbose=True)
-    history_lbfgs = training.lbfgs_step(mode="combined", N_LBFGS=150, verbose=True)
+    history_lbfgs = training.lbfgs_step(mode="combined", n_steps=150, verbose=True)
     return history_adam, history_lbfgs
 
 

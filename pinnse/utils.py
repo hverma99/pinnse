@@ -8,6 +8,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 
+from ._deprecation import warn_renamed
 from .PINNs import ANN
 
 
@@ -468,9 +469,9 @@ class Denormalization:
         return data
 
     @staticmethod
-    def mean_abs(data_norm, metrics):
+    def mean_norm(data_norm, metrics):
         """
-        Inverse of mean normalization
+        Inverse of mean normalization (`Normalization.mean_norm`)
         z = z_norm * (z_max - z_min) + z_mean
 
         Inputs
@@ -498,9 +499,9 @@ class Denormalization:
         return data
 
     @staticmethod
-    def z_norm(data_norm, metrics):
+    def z_score(data_norm, metrics):
         """
-        Inverse of Z-score normalization
+        Inverse of Z-score normalization (`Normalization.z_score`)
         z = z_norm * z_std + z_mean
 
         Inputs
@@ -525,6 +526,18 @@ class Denormalization:
             cmean, cstd = metrics[col]["mean"], metrics[col]["std"]
             data[col] = data[col] * cstd + cmean
         return data
+
+    @staticmethod
+    def mean_abs(data_norm, metrics):
+        """Deprecated alias of `Denormalization.mean_norm`, kept until pinnse 2.0."""
+        warn_renamed("Denormalization.mean_abs", "Denormalization.mean_norm")
+        return Denormalization.mean_norm(data_norm, metrics)
+
+    @staticmethod
+    def z_norm(data_norm, metrics):
+        """Deprecated alias of `Denormalization.z_score`, kept until pinnse 2.0."""
+        warn_renamed("Denormalization.z_norm", "Denormalization.z_score")
+        return Denormalization.z_score(data_norm, metrics)
 
 
 class Analyze:

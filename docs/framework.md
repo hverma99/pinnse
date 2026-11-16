@@ -67,7 +67,7 @@ Each example follows the same workflow, organized across a small set of files:
 | {class}`~pinnse.ANN` | Fully connected feedforward network with Xavier-uniform weights and zero biases. | General-purpose PINN surrogate. The default choice. |
 | {class}`~pinnse.SANN` | Same as `ANN`, with `Softplus` on the output layer. | Outputs that must be non-negative (concentrations, flowrates). |
 | {class}`~pinnse.MultiHeadANN` | Shared trunk with multiple independent output heads. | Outputs that group naturally (compositions vs. temperature) and benefit from a shared representation with separate specialization. |
-| {class}`~pinnse.Fourier_ANN` | Feedforward network with a sinusoidal Fourier-feature embedding of the last input coordinate. | Targets that vary rapidly or at multiple scales along one input (reactor length, for example). |
+| {class}`~pinnse.FourierANN` | Feedforward network with a sinusoidal Fourier-feature embedding of the last input coordinate. | Targets that vary rapidly or at multiple scales along one input (reactor length, for example). |
 | {class}`~pinnse.RecurrentANN` | Recurrent sequence-to-sequence network (RNN, GRU or LSTM) with an output head at each time step. | Dynamic processes. See {doc}`dynamic`. |
 
 ## Training
@@ -77,7 +77,7 @@ Each example follows the same workflow, organized across a small set of files:
 | Method | Purpose |
 |---|---|
 | `adam_step(epochs, val_every)` | First-order training with Adam. Validates periodically and checkpoints the best model. |
-| `lbfgs_step(mode, N_LBFGS)` | Second-order refinement with L-BFGS (full batch, strong Wolfe line search). Modes: `"data"`, `"physics"`, `"boundary"`, `"combined"`, `"overall physics"`. |
+| `lbfgs_step(mode, n_steps)` | Second-order refinement with L-BFGS (full batch, strong Wolfe line search). Modes: `"data"`, `"physics"`, `"boundary"`, `"combined"`, `"overall physics"`. |
 | `validate_test(loader)` | Evaluate data, physics, and boundary losses on a loader. |
 
 Key constructor parameters:
