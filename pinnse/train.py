@@ -23,10 +23,13 @@ parameter gradients. `PCGrad` is provided as a reference implementation; any
 other multi-objective strategy can be supplied without modifying this module.
 """
 
+import logging
 import math
 import numbers
 import os
 import random
+import sys
+import warnings
 from itertools import cycle
 from typing import Callable, Optional, Union
 
@@ -34,11 +37,80 @@ import torch
 from torch import nn
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
+import numpy as np
 from tqdm import tqdm
 
 from ._deprecation import warn_renamed
 
 CKPT_METRICS = ("total", "total_current", "data")
+
+
+# Progress messages are logged here (INFO); `verbose=True` also prints them.
+_LOGGER = logging.getLogger("pinnse")
+
+# History lists built by `adam_step` (and saved with the resumable state).
+_ADAM_LISTS = (
+    "loss_t",
+    "loss_d",
+    "loss_p",
+    "loss_b",
+    "val_loss_t",
+    "val_loss_d",
+    "val_loss_p",
+    "val_loss_b",
+    "val_metric",
+    "val_epochs",
+    "wt_phys",
+    "wt_bnd",
+    "inv_param",
+)
+
+
+def _first_tensors(loader) -> list:
+    """The first tensor of every batch of `loader` (empty for None)."""
+    return [batch[0] for batch in loader] if loader is not None else []
+
+
+def _value(x) -> float:
+    """Python float of a 0-d tensor or a number."""
+    return x.item() if torch.is_tensor(x) else float(x)
+
+
+def _plain(obj):
+    """Convert arrays and NumPy scalars to lists and Python numbers, recursively."""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, dict):
+        return {key: _plain(value) for key, value in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(value) for value in obj]
+    return obj
+
+
+def _json_like(obj) -> bool:
+    """Whether `obj` holds only dicts with string keys, lists and scalars."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return True
+    if isinstance(obj, (list, tuple)):
+        return all(_json_like(value) for value in obj)
+    if isinstance(obj, dict):
+        return all(isinstance(k, str) and _json_like(v) for k, v in obj.items())
+    return False
+
+
+def _progress_disabled(progress: Optional[bool]) -> bool:
+    """
+    tqdm's `disable` flag: the explicit choice, or else on in terminals and
+    notebooks and off when stderr is not a terminal (e.g. batch-job logs).
+    """
+    if progress is not None:
+        return not progress
+    if "ipykernel" in sys.modules:
+        return False
+    isatty = getattr(sys.stderr, "isatty", None)
+    return not (isatty is not None and isatty())
 
 
 def _require_positive_int(value, name: str) -> int:
@@ -132,6 +204,91 @@ class PCGrad(object):
 
 
 class Training(object):
+    """
+    Train, validate and test a PyTorch model with an optional physics loss and
+    boundary loss.
+
+    Inputs
+    ------
+    model : nn.Module
+        Network to train. Its forward pass maps an input batch to one tensor.
+    train_loader, val_loader, test_loader : DataLoader
+        Labeled loaders yielding `(x, y)` batches.
+    optimizer : torch.optim.Optimizer
+        Optimizer of `adam_step`. For inverse problems it must also hold `theta`.
+    loss_fn : nn.Module
+        Data loss, e.g. `nn.MSELoss()`.
+    device : torch.device
+        Device the batches are moved to.
+    scheduler : LRScheduler or ReduceLROnPlateau, optional
+        Stepped every epoch, or, for ReduceLROnPlateau, on every validation
+        with the checkpoint metric.
+    phys_coll_loader, bnd_coll_loader : DataLoader, optional
+        Physics- and boundary-collocation loaders yielding `(x,)` batches.
+    phys_residual, bnd_residual : callable, optional
+        `(x, y) -> residual` with one row per point; the loss is the mean
+        squared residual.
+    ckpt_path : str, optional, default="./logs/best_model.pth"
+        File of the best checkpoint.
+    phys_weight, bnd_weight : float, optional, default=0.0
+        Non-negative weights of the physics and boundary losses; zero disables
+        a loss.
+    adapt_wts : bool, optional, default=False
+        Adapt the non-zero weights from the gradient norms of the losses.
+    theta : nn.Parameter, optional
+        Unknown process parameters of an inverse problem, saved with and
+        restored from the checkpoints.
+    grad_aggregator : callable, optional
+        Strategy combining the per-loss gradients (see `PCGrad`).
+    weight_scheme : callable, optional
+        `(grad_d, grad_p, grad_b) -> (target_wp, target_wb)` replacing the
+        default adaptive-weight rule.
+    log_grad_norms : bool, optional, default=False
+        Whether to record the per-epoch gradient norms of the data, physics
+        and boundary losses (`grad_data_hist`, `grad_phys_hist`,
+        `grad_bnd_hist`). Each norm costs an additional backward pass, so they
+        are computed only when requested here or when `adapt_wts=True`, which
+        needs them; otherwise the histories are recorded as zeros.
+    seed : int, optional, default=None
+        Seed of the random generator owned by this trainer, which selects
+        the collocation batches evaluated during validation. If None, it is
+        taken from `torch.initial_seed()`, so a run seeded with
+        `torch.manual_seed` (or `pinnse.seed_everything`) is reproducible.
+    ckpt_metric : str, optional, default="total"
+        Validation quantity used to select the best checkpoint and to step
+        a `ReduceLROnPlateau` scheduler:
+
+        - ``"total"``: data loss plus the physics and boundary losses
+          weighted by the *initial* weights. With adaptive weights this
+          keeps every validation epoch on the same scale.
+        - ``"total_current"``: as above, but with the weights current at
+          that epoch (the behaviour of pinnse < 1.0).
+        - ``"data"``: validation data loss only.
+    wt_update_every : int, optional, default=10
+        Epochs between two updates of the adaptive weights.
+    wt_ema : float, optional, default=0.1
+        Smoothing factor in (0, 1] of the adaptive-weight update: each update
+        moves a weight this fraction of the way to its target.
+    val_colloc_frac : float, optional, default=0.25
+        Fraction of the training collocation batches on which the validation
+        and test residual losses are evaluated (at least one batch). The
+        subset is drawn once, so every validation uses the same points.
+    val_phys_coll_loader, val_bnd_coll_loader : DataLoader, optional
+        Held-out collocation points. When given, the validation and test
+        residual losses are evaluated on all of these instead of a subset of
+        the training points.
+    grad_norm_every : int, optional, default=1
+        Compute the logged gradient norms on every n-th training batch only;
+        each epoch's value is the mean over those batches. Larger values cut
+        the cost of `log_grad_norms` and of adaptive weighting.
+    check_residuals : bool, optional, default=True
+        Run `verify_residuals` before the first training step.
+    metadata : dict, optional
+        JSON-like data saved in every checkpoint, e.g. the normalization
+        metrics, so that a model can be evaluated without the training data
+        (see `Analyze.load_checkpoint`).
+    """
+
     def __init__(
         self,
         model: nn.Module,
@@ -156,39 +313,50 @@ class Training(object):
         log_grad_norms: bool = False,
         seed: Optional[int] = None,
         ckpt_metric: str = "total",
+        wt_update_every: int = 10,
+        wt_ema: float = 0.1,
+        val_colloc_frac: float = 0.25,
+        val_phys_coll_loader: Optional[torch.utils.data.DataLoader] = None,
+        val_bnd_coll_loader: Optional[torch.utils.data.DataLoader] = None,
+        grad_norm_every: int = 1,
+        check_residuals: bool = True,
+        metadata: Optional[dict] = None,
     ):
-        """
-        Inputs
-        ------
-        log_grad_norms : bool, optional, default=False
-            Whether to record the per-epoch gradient norms of the data, physics
-            and boundary losses (`grad_data_hist`, `grad_phys_hist`,
-            `grad_bnd_hist`). Each norm costs an additional backward pass per
-            batch, so they are computed only when requested here or when
-            `adapt_wts=True`, which needs them; otherwise the histories are
-            recorded as zeros.
-
-        seed : int, optional, default=None
-            Seed of the random generator owned by this trainer, which selects
-            the collocation batches evaluated during validation. If None, it is
-            taken from `torch.initial_seed()`, so a run seeded with
-            `torch.manual_seed` (or `pinnse.seed_everything`) is reproducible.
-
-        ckpt_metric : str, optional, default="total"
-            Validation quantity used to select the best checkpoint and to step
-            a `ReduceLROnPlateau` scheduler:
-
-            - ``"total"``: data loss plus the physics and boundary losses
-              weighted by the *initial* weights. With adaptive weights this
-              keeps every validation epoch on the same scale.
-            - ``"total_current"``: as above, but with the weights current at
-              that epoch (the behaviour of pinnse < 1.0).
-            - ``"data"``: validation data loss only.
-        """
         if ckpt_metric not in CKPT_METRICS:
             raise ValueError(
                 f"ckpt_metric must be one of {CKPT_METRICS}; received {ckpt_metric!r}."
             )
+        for name, weight in (("phys_weight", phys_weight), ("bnd_weight", bnd_weight)):
+            if not (math.isfinite(weight) and weight >= 0):
+                raise ValueError(
+                    f"{name} must be a finite, non-negative number; received {weight!r}."
+                )
+        if not 0 < wt_ema <= 1:
+            raise ValueError(f"wt_ema must lie in (0, 1]; received {wt_ema!r}.")
+        if not 0 < val_colloc_frac <= 1:
+            raise ValueError(
+                f"val_colloc_frac must lie in (0, 1]; received {val_colloc_frac!r}."
+            )
+        if metadata is not None and not _json_like(metadata):
+            raise ValueError(
+                "metadata must be a dict of JSON-like values (dicts with string "
+                "keys, lists, str, int, float, bool or None), so that checkpoints "
+                "stay loadable with weights_only=True; convert arrays with "
+                ".tolist()."
+            )
+        for kind, weight, residual, loader in (
+            ("phys", phys_weight, phys_residual, phys_coll_loader),
+            ("bnd", bnd_weight, bnd_residual, bnd_coll_loader),
+        ):
+            if weight != 0 and (residual is None or loader is None):
+                missing = "residual" if residual is None else "coll_loader"
+                warnings.warn(
+                    f"{kind}_weight={weight} but no {kind}_{missing} was given, so "
+                    f"this loss term is disabled.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -213,6 +381,14 @@ class Training(object):
         self.seed = seed if seed is not None else torch.initial_seed()
         self._rng = random.Random(self.seed)
         self._val_subsets: dict = {}
+        self.wt_update_every = _require_positive_int(wt_update_every, "wt_update_every")
+        self.wt_ema = wt_ema
+        self.val_colloc_frac = val_colloc_frac
+        self.grad_norm_every = _require_positive_int(grad_norm_every, "grad_norm_every")
+        self.check_residuals = check_residuals
+        self._residuals_verified = False
+        self.metadata = metadata
+        self.history: dict = {}
 
         # Reference weights of the "total" checkpoint metric; the working
         # weights below may be changed by the adaptive weighting.
@@ -222,22 +398,13 @@ class Training(object):
 
         os.makedirs(os.path.dirname(self.ckpt_path) or ".", exist_ok=True)
 
-        self.wt_update_every = 10
-        self.wt_ema = 0.1
-
-        self.grad_data_hist = []
-        self.grad_phys_hist = []
-        self.grad_bnd_hist = []
-        self.all_phys_colloc_batches = (
-            [b[0] for b in self.phys_coll_loader]
-            if self.phys_coll_loader is not None
-            else []
-        )
-        self.all_bnd_colloc_batches = (
-            [b[0] for b in self.bnd_coll_loader]
-            if self.bnd_coll_loader is not None
-            else []
-        )
+        self.grad_data_hist: list = []
+        self.grad_phys_hist: list = []
+        self.grad_bnd_hist: list = []
+        self.all_phys_colloc_batches = _first_tensors(self.phys_coll_loader)
+        self.all_bnd_colloc_batches = _first_tensors(self.bnd_coll_loader)
+        self.val_phys_colloc_batches = _first_tensors(val_phys_coll_loader)
+        self.val_bnd_colloc_batches = _first_tensors(val_bnd_coll_loader)
         self.trainable_params = [p for p in self.model.parameters() if p.requires_grad]
 
         # Parameters seen by a custom gradient aggregator.
@@ -249,11 +416,20 @@ class Training(object):
         if self.theta is not None and self.theta.requires_grad:
             self.agg_params.append(self.theta)
 
+    # ------------------------------------------------------------- checkpoints
+    @property
+    def last_ckpt_path(self) -> str:
+        """File of the resumable training state written by `adam_step(save_every=...)`."""
+        root, ext = os.path.splitext(self.ckpt_path)
+        return f"{root}_last{ext or '.pth'}"
+
     def _save_checkpoint(self):
         """Save the model state and, for inverse problems, the current theta."""
         state = {"model_state_dict": self.model.state_dict()}
         if self.theta is not None:
             state["theta"] = self.theta.detach().cpu().clone()
+        if self.metadata is not None:
+            state["metadata"] = self.metadata
         torch.save(state, self.ckpt_path)
 
     def _load_checkpoint(self):
@@ -265,6 +441,96 @@ class Training(object):
                 self.theta.copy_(ckpt["theta"])
         return ckpt
 
+    def _loaders_with_generators(self) -> dict:
+        loaders = {
+            "train": self.train_loader,
+            "physics": self.phys_coll_loader,
+            "boundary": self.bnd_coll_loader,
+        }
+        return {
+            name: loader
+            for name, loader in loaders.items()
+            if getattr(loader, "generator", None) is not None
+        }
+
+    def _save_last_state(
+        self, epoch: int, history: dict, best_total: float, ckpt_saved: bool
+    ):
+        """Write everything needed to resume `adam_step` after `epoch`."""
+        state = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": (
+                self.scheduler.state_dict() if self.scheduler is not None else None
+            ),
+            "theta": None if self.theta is None else self.theta.detach().cpu().clone(),
+            "weights": [float(self.phys_weight), float(self.bnd_weight)],
+            "best": [best_total, ckpt_saved, self.best_epoch],
+            "history": _plain(history),
+            "grad_hists": _plain(
+                [self.grad_data_hist, self.grad_phys_hist, self.grad_bnd_hist]
+            ),
+            "rng": {
+                "torch": torch.get_rng_state(),
+                "cuda": torch.cuda.get_rng_state_all()
+                if torch.cuda.is_available()
+                else [],
+                "trainer": self._rng.getstate(),
+                "val_subsets": dict(self._val_subsets),
+                "loaders": {
+                    name: loader.generator.get_state()
+                    for name, loader in self._loaders_with_generators().items()
+                },
+            },
+            "metadata": self.metadata,
+        }
+        # Write to a temporary file first, so that a job killed while saving
+        # leaves the previous state intact.
+        tmp = self.last_ckpt_path + ".tmp"
+        torch.save(state, tmp)
+        os.replace(tmp, self.last_ckpt_path)
+
+    def _load_last_state(self) -> Optional[dict]:
+        """Restore the state written by `_save_last_state`, or return None."""
+        if not os.path.exists(self.last_ckpt_path):
+            warnings.warn(
+                f"resume=True but no saved training state was found at "
+                f"{self.last_ckpt_path!r}; training starts at epoch 1.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
+        state = torch.load(self.last_ckpt_path, map_location="cpu", weights_only=True)
+        self.model.load_state_dict(state["model_state_dict"])
+        self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        if self.scheduler is not None and state["scheduler_state_dict"] is not None:
+            self.scheduler.load_state_dict(state["scheduler_state_dict"])
+        if self.theta is not None and state["theta"] is not None:
+            with torch.no_grad():
+                self.theta.copy_(state["theta"])
+        self.phys_weight, self.bnd_weight = state["weights"]
+        self.best_epoch = state["best"][2]
+        self.grad_data_hist, self.grad_phys_hist, self.grad_bnd_hist = state[
+            "grad_hists"
+        ]
+        rng = state["rng"]
+        torch.set_rng_state(rng["torch"])
+        if rng["cuda"] and torch.cuda.is_available():  # pragma: no cover - GPU only
+            torch.cuda.set_rng_state_all(rng["cuda"])
+        self._rng.setstate(rng["trainer"])
+        self._val_subsets = dict(rng["val_subsets"])
+        for name, loader in self._loaders_with_generators().items():
+            if name in rng["loaders"]:
+                loader.generator.set_state(rng["loaders"][name])
+        history = state["history"]
+        history["inv_param"] = [
+            np.asarray(p, dtype=np.float32) for p in history["inv_param"]
+        ]
+        state["history"] = history
+        return state
+
+    # --------------------------------------------------------------- residuals
     def _residual_on(self, kind: str) -> bool:
         """Whether the "physics" or "boundary" loss has a residual and a non-zero weight."""
         if kind == "physics":
@@ -283,6 +549,70 @@ class Training(object):
         x = x.detach().to(self.device).requires_grad_(True)
         return torch.mean(residual(x, self.model(x)) ** 2)  # type: ignore[misc]
 
+    def verify_residuals(self) -> None:
+        """
+        Check every active residual once, on its first collocation batch.
+
+        A residual must return a tensor with one row per collocation point and
+        finite values; a residual that does not depend on the network output,
+        and so cannot train it, triggers a warning. The check runs with the
+        model in evaluation mode and leaves the model, its mode and the random
+        number generators unchanged. `adam_step` and `lbfgs_step` call it
+        automatically unless `check_residuals=False`.
+        """
+        for kind, batches in (
+            ("physics", self.all_phys_colloc_batches),
+            ("boundary", self.all_bnd_colloc_batches),
+        ):
+            if not self._residual_on(kind) or not batches:
+                continue
+            residual = self.phys_residual if kind == "physics" else self.bnd_residual
+            x = batches[0].detach().to(self.device).requires_grad_(True)
+            was_training = self.model.training
+            devices = [self.device] if self.device.type == "cuda" else []
+            self.model.eval()
+            try:
+                with torch.random.fork_rng(devices=devices):
+                    y = self.model(x)
+                    res = residual(x, y)  # type: ignore[misc]
+                    name = f"The {kind} residual"
+                    if not torch.is_tensor(res):
+                        raise TypeError(
+                            f"{name} must return a torch.Tensor; it returned "
+                            f"{type(res).__name__}."
+                        )
+                    if res.dim() == 0 or res.shape[0] != x.shape[0]:
+                        raise ValueError(
+                            f"{name} must return one row per collocation point, "
+                            f"i.e. a leading dimension of {x.shape[0]}; it returned "
+                            f"shape {tuple(res.shape)}."
+                        )
+                    if not torch.isfinite(res).all():
+                        raise ValueError(
+                            f"{name} is not finite on the first collocation batch "
+                            "(check units, normalization and divisions); pass "
+                            "check_residuals=False to skip this check."
+                        )
+                    grad = (
+                        torch.autograd.grad(res.sum(), y, allow_unused=True)[0]
+                        if res.requires_grad
+                        else None
+                    )
+                    if grad is None:
+                        warnings.warn(
+                            f"{name} does not depend on the network output, so its "
+                            "loss cannot train the model.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+            finally:
+                self.model.train(was_training)
+        self._residuals_verified = True
+
+    def _verify_once(self) -> None:
+        if self.check_residuals and not self._residuals_verified:
+            self.verify_residuals()
+
     def grad_norm(self, loss):
         if loss is not None:
             g_ = torch.autograd.grad(
@@ -298,6 +628,7 @@ class Training(object):
             norm = torch.tensor(0.0, device=self.device)
         return norm
 
+    # ---------------------------------------------------------------- training
     def train_epoch(self):
         self.model.train()
         phys_coll_iter = cycle(
@@ -307,12 +638,12 @@ class Training(object):
             self.bnd_coll_loader if self.bnd_coll_loader is not None else []
         )
 
-        tot_loss_sum, data_loss_sum, phys_loss_sum, bnd_loss_sum = 0.0, 0.0, 0.0, 0.0
-        n_samples, n_phys_colloc, n_bnd_colloc = 0, 0, 0
-        grad_d_sum, grad_p_sum, grad_b_sum = 0.0, 0.0, 0.0
-        grad_count = 0
+        # Losses are kept on the device and read back once, at the end of the
+        # epoch, rather than synchronizing with `.item()` after every batch.
+        sizes, totals, data_losses = [], [], []
+        phys_terms, bnd_terms, grad_norms = [], [], []
 
-        for x_batch, y_batch in self.train_loader:
+        for i, (x_batch, y_batch) in enumerate(self.train_loader):
             x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
             batch_size = x_batch.size(0)
@@ -332,11 +663,10 @@ class Training(object):
                 bnd_coll_size = x_bnd.size(0)
                 lb = self._residual_loss("boundary", x_bnd)
 
-            if self.log_grad_norms:
-                grad_d_sum += self.grad_norm(ld).item()
-                grad_p_sum += self.grad_norm(lp).item()
-                grad_b_sum += self.grad_norm(lb).item()
-            grad_count += 1
+            if self.log_grad_norms and i % self.grad_norm_every == 0:
+                grad_norms.append(
+                    (self.grad_norm(ld), self.grad_norm(lp), self.grad_norm(lb))
+                )
 
             if self.grad_aggregator is not None:
                 self.optimizer.zero_grad()
@@ -360,24 +690,33 @@ class Training(object):
                 loss.backward()
                 self.optimizer.step()
 
-            # Accounting losses
-            tot_loss_sum += loss.item() * batch_size
-            data_loss_sum += ld.item() * batch_size
-            phys_loss_sum += lp.item() * phys_coll_size if lp is not None else 0.0
-            bnd_loss_sum += lb.item() * bnd_coll_size if lb is not None else 0.0
+            sizes.append(batch_size)
+            totals.append(loss.detach() if torch.is_tensor(loss) else loss)
+            data_losses.append(ld.detach())
+            if lp is not None:
+                phys_terms.append((lp.detach(), phys_coll_size))
+            if lb is not None:
+                bnd_terms.append((lb.detach(), bnd_coll_size))
 
-            n_samples += batch_size
-            n_phys_colloc += phys_coll_size
-            n_bnd_colloc += bnd_coll_size
+        n_samples = sum(sizes)
+        n_phys_colloc = sum(n for _, n in phys_terms)
+        n_bnd_colloc = sum(n for _, n in bnd_terms)
 
-        avg_total = tot_loss_sum / n_samples if n_samples else 0.0
-        avg_data = data_loss_sum / n_samples if n_samples else 0.0
-        avg_phys = phys_loss_sum / n_phys_colloc if n_phys_colloc else 0.0
-        avg_bnd = bnd_loss_sum / n_bnd_colloc if n_bnd_colloc else 0.0
+        def weighted_sum(pairs):
+            return sum(_value(v) * n for v, n in pairs)
 
-        avg_grad_d = grad_d_sum / grad_count if grad_count else 0.0
-        avg_grad_p = grad_p_sum / grad_count if grad_count else 0.0
-        avg_grad_b = grad_b_sum / grad_count if grad_count else 0.0
+        avg_total = weighted_sum(zip(totals, sizes)) / n_samples if n_samples else 0.0
+        avg_data = (
+            weighted_sum(zip(data_losses, sizes)) / n_samples if n_samples else 0.0
+        )
+        avg_phys = weighted_sum(phys_terms) / n_phys_colloc if n_phys_colloc else 0.0
+        avg_bnd = weighted_sum(bnd_terms) / n_bnd_colloc if n_bnd_colloc else 0.0
+
+        n_grad = len(grad_norms)
+        grads = [[_value(g) for g in triple] for triple in grad_norms]
+        avg_grad_d, avg_grad_p, avg_grad_b = (
+            (sum(g[k] for g in grads) / n_grad if n_grad else 0.0) for k in range(3)
+        )
 
         return {
             "total_loss": avg_total,
@@ -389,6 +728,7 @@ class Training(object):
             "avg_grad_b": avg_grad_b,
         }
 
+    # -------------------------------------------------------------- validation
     def _colloc_subset(self, batches: list, kind: str, frac: float) -> list:
         """
         Return the collocation batches evaluated during validation and testing.
@@ -417,9 +757,17 @@ class Training(object):
     def validate_test(
         self,
         loader: torch.utils.data.DataLoader,
-        phys_colloc_frac: float = 0.25,
-        bnd_colloc_frac: float = 0.25,
+        phys_colloc_frac: Optional[float] = None,
+        bnd_colloc_frac: Optional[float] = None,
     ):
+        """
+        Data, physics and boundary losses of the model on `loader`.
+
+        The residual losses are evaluated on the held-out collocation loaders
+        when given, and otherwise on a fixed fraction of the training
+        collocation batches (`phys_colloc_frac` / `bnd_colloc_frac`, by
+        default `val_colloc_frac`).
+        """
         self.model.eval()
 
         tot_data_loss, n_data = 0.0, 0
@@ -435,24 +783,98 @@ class Training(object):
         avg_data = tot_data_loss / n_data if n_data else 0.0
 
         avg_phys = self._colloc_loss(
-            "physics", self.all_phys_colloc_batches, phys_colloc_frac
+            "physics",
+            self.val_phys_colloc_batches or self.all_phys_colloc_batches,
+            None if self.val_phys_colloc_batches else phys_colloc_frac,
         )
         avg_bnd = self._colloc_loss(
-            "boundary", self.all_bnd_colloc_batches, bnd_colloc_frac
+            "boundary",
+            self.val_bnd_colloc_batches or self.all_bnd_colloc_batches,
+            None if self.val_bnd_colloc_batches else bnd_colloc_frac,
         )
         return avg_data, avg_phys, avg_bnd
 
-    def _colloc_loss(self, kind: str, batches: list, frac: float) -> float:
-        """Sample-weighted residual loss over the validation subset of `batches`."""
+    def _colloc_loss(self, kind: str, batches: list, frac: Optional[float]) -> float:
+        """
+        Sample-weighted residual loss over the validation subset of `batches`,
+        or over all of them when `batches` is a held-out set (`frac` is None).
+        """
         if not self._residual_on(kind) or not batches:
             return 0.0
+        held_out = (
+            self.val_phys_colloc_batches
+            if kind == "physics"
+            else self.val_bnd_colloc_batches
+        )
+        if held_out:
+            subset = batches
+        else:
+            frac = self.val_colloc_frac if frac is None else frac
+            subset = self._colloc_subset(batches, kind, frac)
         total, n = 0.0, 0
-        for x in self._colloc_subset(batches, kind, frac):
+        for x in subset:
             total += self._residual_loss(kind, x).item() * x.size(0)
             n += x.size(0)
         return total / n
 
-    def adam_step(self, epochs: int, val_every: int, verbose: bool = True):
+    # --------------------------------------------------------------- reporting
+    @staticmethod
+    def _report(verbose: bool, message: str) -> None:
+        """Log `message` to the "pinnse" logger and, when verbose, print it."""
+        _LOGGER.info(message)
+        if verbose:
+            tqdm.write(message)
+
+    @staticmethod
+    def _losses_line(prefix: str, total: float, data: float, phys: float, bnd: float):
+        return (
+            f"{prefix} | Total Loss: {total:.2e}, Data Loss: {data:.2e}, "
+            f"Physics Loss: {phys:.2e}, Boundary Loss: {bnd:.2e}"
+        )
+
+    # ---------------------------------------------------------------- adam_step
+    def adam_step(
+        self,
+        epochs: int,
+        val_every: int,
+        verbose: bool = True,
+        *,
+        progress: Optional[bool] = None,
+        save_every: Optional[int] = None,
+        resume: bool = False,
+    ):
+        """
+        First-phase training with `optimizer`, validating every `val_every`
+        epochs, keeping the best checkpoint and finally restoring and testing it.
+
+        Inputs
+        ------
+        epochs : int
+            Total number of epochs (including those already done when resuming).
+        val_every : int
+            Validation period, in epochs; must not exceed `epochs`.
+        verbose : bool, optional, default=True
+            Print the first training epoch, every validation and the test
+            losses. The same messages are always logged to the "pinnse"
+            logger at INFO level.
+        progress : bool, optional, default=None
+            Show a progress bar. None shows it in terminals and notebooks and
+            hides it when stderr is not a terminal, e.g. in batch jobs.
+        save_every : int, optional
+            Every `save_every` epochs, and after the last one, write the
+            complete training state (model, optimizer, scheduler, weights,
+            history, random-generator states) to `last_ckpt_path`.
+        resume : bool, optional, default=False
+            Continue from the state in `last_ckpt_path`, if present. A run
+            whose data and trainer are rebuilt identically continues exactly
+            as the uninterrupted run would have.
+
+        Returns
+        -------
+        history : dict
+            Training, validation and test losses, weights, gradient norms and
+            inverse parameters (also stored as `self.history`).
+        """
         epochs = _require_positive_int(epochs, "epochs")
         val_every = _require_positive_int(val_every, "val_every")
         if val_every > epochs:
@@ -460,24 +882,35 @@ class Training(object):
                 f"val_every={val_every} exceeds epochs={epochs}: no validation "
                 "epoch would be reached, so no checkpoint could be selected."
             )
+        if save_every is not None:
+            save_every = _require_positive_int(save_every, "save_every")
+        self._verify_once()
 
-        best_total = float("inf")
-        ckpt_saved = False
+        h: dict = {key: [] for key in _ADAM_LISTS}
+        best_total, ckpt_saved, start = float("inf"), False, 1
         self.best_epoch = None
-        loss_t, loss_d, loss_p, loss_b = [], [], [], []
-        val_loss_t, val_loss_d, val_loss_p, val_loss_b = [], [], [], []
-        val_metric = []
-        wt_phys, wt_bnd = [], []
-        inv_param = []
+        if resume:
+            state = self._load_last_state()
+            if state is not None:
+                h = state["history"]
+                best_total, ckpt_saved, _ = state["best"]
+                start = state["epoch"] + 1
 
-        pbar = tqdm(range(1, epochs + 1), desc="Training", unit="epoch")
+        pbar = tqdm(
+            range(start, epochs + 1),
+            initial=start - 1,
+            total=epochs,
+            desc="Training",
+            unit="epoch",
+            disable=_progress_disabled(progress),
+        )
 
         for epoch in pbar:
             loss_stats = self.train_epoch()
-            loss_t.append(loss_stats["total_loss"])
-            loss_d.append(loss_stats["data_loss"])
-            loss_p.append(loss_stats["phys_loss"])
-            loss_b.append(loss_stats["bnd_loss"])
+            h["loss_t"].append(loss_stats["total_loss"])
+            h["loss_d"].append(loss_stats["data_loss"])
+            h["loss_p"].append(loss_stats["phys_loss"])
+            h["loss_b"].append(loss_stats["bnd_loss"])
 
             self.grad_data_hist.append(loss_stats["avg_grad_d"])
             self.grad_phys_hist.append(loss_stats["avg_grad_p"])
@@ -492,14 +925,16 @@ class Training(object):
             pbar.set_description(f"Epoch {epoch}/{epochs}")
             pbar.set_postfix(postfix)
 
-            if epoch == 1 and verbose:
-                tqdm.write(
-                    f"\033[32m\nEpoch: {epoch} | Training  | "
-                    f"Total Loss:    {loss_stats['total_loss']:.2e},"
-                    f"\tData Loss:     {loss_stats['data_loss']:.2e},"
-                    f"\tPhysics Loss:  {loss_stats['phys_loss']:.2e},"
-                    f"\tBoundary Loss: {loss_stats['bnd_loss']:.2e}"
-                    f"\033[0m"
+            if epoch == 1:
+                self._report(
+                    verbose,
+                    self._losses_line(
+                        f"Epoch: {epoch} | Training",
+                        loss_stats["total_loss"],
+                        loss_stats["data_loss"],
+                        loss_stats["phys_loss"],
+                        loss_stats["bnd_loss"],
+                    ),
                 )
 
             if (
@@ -534,34 +969,36 @@ class Training(object):
                         1.0 - self.wt_ema
                     ) * self.bnd_weight + self.wt_ema * target_wb
 
-            wt_phys.append(self.phys_weight)
-            wt_bnd.append(self.bnd_weight)
+            h["wt_phys"].append(self.phys_weight)
+            h["wt_bnd"].append(self.bnd_weight)
 
             if epoch % val_every == 0:
                 val_data, val_phys, val_bnd = self.validate_test(loader=self.val_loader)
                 val_total = (
                     val_data + self.phys_weight * val_phys + self.bnd_weight * val_bnd
                 )
-                val_loss_t.append(val_total)
-                val_loss_d.append(val_data)
-                val_loss_p.append(val_phys)
-                val_loss_b.append(val_bnd)
-                if verbose:
-                    tqdm.write(
-                        f"\033[34m\nEpoch: {epoch} | Validation |"
-                        f"Total Loss:    {val_total:.2e},"
-                        f"\tData Loss:     {val_data:.2e},"
-                        f"\tPhysics Loss:  {val_phys:.2e},"
-                        f"\tBoundary Loss: {val_bnd:.2e}"
-                        f"\033[0m"
-                    )
+                h["val_loss_t"].append(val_total)
+                h["val_loss_d"].append(val_data)
+                h["val_loss_p"].append(val_phys)
+                h["val_loss_b"].append(val_bnd)
+                h["val_epochs"].append(epoch)
+                self._report(
+                    verbose,
+                    self._losses_line(
+                        f"Epoch: {epoch} | Validation",
+                        val_total,
+                        val_data,
+                        val_phys,
+                        val_bnd,
+                    ),
+                )
                 # The checkpoint is selected on a quantity whose scale does not
                 # change with the adaptive weights (see `ckpt_metric`). A
                 # non-finite value never counts as an improvement, so a run
                 # that diverges does not overwrite, or later reload, a usable
                 # checkpoint.
                 metric = self._selection_metric(val_data, val_phys, val_bnd)
-                val_metric.append(metric)
+                h["val_metric"].append(metric)
                 if math.isfinite(metric) and metric < best_total:
                     best_total = metric
                     self._save_checkpoint()
@@ -569,7 +1006,7 @@ class Training(object):
                     self.best_epoch = epoch
 
                 if self.theta is not None:
-                    inv_param.append(self.theta.detach().cpu().numpy().copy())
+                    h["inv_param"].append(self.theta.detach().cpu().numpy().copy())
 
                 if self.scheduler is not None and isinstance(
                     self.scheduler, ReduceLROnPlateau
@@ -580,6 +1017,9 @@ class Training(object):
                 self.scheduler, ReduceLROnPlateau
             ):
                 self.scheduler.step()
+
+            if save_every is not None and (epoch % save_every == 0 or epoch == epochs):
+                self._save_last_state(epoch, h, best_total, ckpt_saved)
         pbar.close()
 
         if not ckpt_saved:
@@ -593,30 +1033,36 @@ class Training(object):
         test_total = (
             test_data + self.phys_weight * test_phys + self.bnd_weight * test_bnd
         )
-        if verbose:
-            print(
-                f"\033[33m\nTest | Total Loss: {test_total:.2e}, Data Loss: {test_data:.2e}, Physics Loss: {test_phys:.2e}, Boundary Loss: {test_bnd:.2e}\033[0m",
-                flush=True,
-            )
+        self._report(
+            verbose,
+            self._losses_line("Test", test_total, test_data, test_phys, test_bnd),
+        )
 
-        return {
-            "loss_t": loss_t,
-            "loss_d": loss_d,
-            "loss_p": loss_p,
-            "loss_b": loss_b,
-            "val_loss_t": val_loss_t,
-            "val_loss_d": val_loss_d,
-            "val_loss_p": val_loss_p,
-            "val_loss_b": val_loss_b,
-            "val_metric": val_metric,
+        history = {
+            "loss_t": h["loss_t"],
+            "loss_d": h["loss_d"],
+            "loss_p": h["loss_p"],
+            "loss_b": h["loss_b"],
+            "val_loss_t": h["val_loss_t"],
+            "val_loss_d": h["val_loss_d"],
+            "val_loss_p": h["val_loss_p"],
+            "val_loss_b": h["val_loss_b"],
+            "val_metric": h["val_metric"],
+            "val_epochs": h["val_epochs"],
             "best_epoch": self.best_epoch,
-            "wt_phys": wt_phys,
-            "wt_bnd": wt_bnd,
+            "wt_phys": h["wt_phys"],
+            "wt_bnd": h["wt_bnd"],
             "grad_data_hist": self.grad_data_hist,
             "grad_phys_hist": self.grad_phys_hist,
             "grad_bnd_hist": self.grad_bnd_hist,
-            "inv_param": inv_param,
+            "inv_param": h["inv_param"],
+            "test_loss_t": test_total,
+            "test_loss_d": test_data,
+            "test_loss_p": test_phys,
+            "test_loss_b": test_bnd,
         }
+        self.history = dict(history)
+        return history
 
     def lbfgs_step(
         self,
@@ -624,6 +1070,7 @@ class Training(object):
         n_steps: Optional[int] = None,
         verbose: bool = True,
         *,
+        progress: Optional[bool] = None,
         N_LBFGS: Optional[int] = None,
     ):
         """
@@ -645,7 +1092,11 @@ class Training(object):
             Number of LBFGS outer steps.
 
         verbose : bool, optional, default=True
-            Whether to print optimization progress.
+            Whether to print the losses after every step (they are always
+            logged to the "pinnse" logger at INFO level).
+
+        progress : bool, optional, default=None
+            Show a progress bar; None decides as in `adam_step`.
 
         N_LBFGS : int, optional
             Deprecated name of `n_steps`, accepted as a keyword until pinnse 2.0.
@@ -653,7 +1104,8 @@ class Training(object):
         Returns
         -------
         history_lbfgs : dict
-            Dictionary containing LBFGS loss histories.
+            Dictionary containing LBFGS loss histories. They are also added to
+            `self.history` with an ``lbfgs_`` prefix.
         """
         if N_LBFGS is not None:
             if n_steps is not None:
@@ -684,6 +1136,8 @@ class Training(object):
                 "physics/boundary terms need a residual, collocation data and "
                 "a non-zero weight."
             )
+
+        self._verify_once()
 
         def gather_full_data(loader):
             X, Y = [], []
@@ -757,7 +1211,12 @@ class Training(object):
 
             return total, ld, lp, lb
 
-        pbar = tqdm(range(1, n_steps + 1), desc=f"LBFGS [{mode}]", unit="step")
+        pbar = tqdm(
+            range(1, n_steps + 1),
+            desc=f"LBFGS [{mode}]",
+            unit="step",
+            disable=_progress_disabled(progress),
+        )
 
         for step in pbar:
             self.lbfgs.step(closure)
@@ -778,14 +1237,9 @@ class Training(object):
                 }
             )
 
-            if verbose:
-                tqdm.write(
-                    f"LBFGS Step: {step} | "
-                    f"Total Loss: {total:.2e}, "
-                    f"Data Loss: {ld:.2e}, "
-                    f"Physics Loss: {lp:.2e}, "
-                    f"Boundary Loss: {lb:.2e}"
-                )
+            self._report(
+                verbose, self._losses_line(f"LBFGS Step: {step}", total, ld, lp, lb)
+            )
 
             if math.isfinite(total) and total < best_total:
                 best_total = total
@@ -795,4 +1249,5 @@ class Training(object):
 
         self._load_checkpoint()
 
+        self.history.update({f"lbfgs_{k}": v for k, v in history_lbfgs.items()})
         return history_lbfgs

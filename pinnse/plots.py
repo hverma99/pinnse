@@ -38,7 +38,7 @@ class Plotter:
     def __init__(
         self,
         history: dict,
-        val_every: int = 1,
+        val_every: int | None = None,
         fontsize: int = 20,
         fontfamily: str = "Arial",
         dpi: int = 300,
@@ -53,7 +53,10 @@ class Plotter:
                 loss_t, loss_d, loss_p, loss_b, val_loss_t, ..., wt_phys, wt_bnd,
                 grad_data_hist, grad_phys_hist, grad_bnd_hist, inv_param.
 
-        val_every : int, optional, default=1 (validation frequency used during training)
+        val_every : int, optional (validation frequency used during training)
+                Only needed for histories without "val_epochs" (recorded by
+                pinnse >= 1.0), which give the validation epochs directly;
+                defaults to 1.
 
         fontsize : int, optional, default=20
 
@@ -96,7 +99,11 @@ class Plotter:
         return np.arange(1, n + 1)
 
     def _val_epochs(self, n):
-        return np.arange(self.val_every, self.val_every * n + 1, self.val_every)
+        recorded = self.history.get("val_epochs")
+        if recorded is not None and len(recorded) >= n:
+            return np.asarray(recorded[:n])
+        step = self.val_every or 1
+        return np.arange(step, step * n + 1, step)
 
     def _epochs_for(self, key, n):
         return self._val_epochs(n) if key.startswith("val_") else self._train_epochs(n)

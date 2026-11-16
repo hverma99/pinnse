@@ -573,11 +573,57 @@ class Analyze:
             Loaded model in evaluation mode.
         """
         layer_size = [dim_in] + [width] * depth + [dim_out]
-        model = ANN(layer_size=layer_size, activation=activation).to(device)
+        model = ANN(layer_size=layer_size, activation=activation)
+        return Analyze.load_model(model, ckpt_path, device)
 
+    @staticmethod
+    def load_checkpoint(
+        ckpt_path: str,
+        model: nn.Module | None = None,
+        device: torch.device | str | None = None,
+    ) -> dict:
+        """
+        Load a checkpoint written by `Training`, optionally into a model.
+
+        Inputs
+        ------
+        ckpt_path : str
+            Path to the checkpoint (or to a bare state dict).
+        model : nn.Module, optional
+            Model of the same architecture; if given, it is moved to `device`,
+            its weights are restored, and it is put in evaluation mode.
+        device : torch.device or str, optional, default="cpu"
+            Device the tensors are loaded onto.
+
+        Returns
+        -------
+        dict
+            The checkpoint: "model_state_dict", plus "theta" for inverse
+            problems and "metadata" when `Training(metadata=...)` was given.
+        """
+        device = torch.device("cpu" if device is None else device)
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt.get("model_state_dict", ckpt))
-        model.eval()
+        if "model_state_dict" not in ckpt:  # a bare state dict
+            ckpt = {"model_state_dict": ckpt}
+        if model is not None:
+            model.to(device)
+            model.load_state_dict(ckpt["model_state_dict"])
+            model.eval()
+        return ckpt
+
+    @staticmethod
+    def load_model(
+        model: nn.Module,
+        ckpt_path: str,
+        device: torch.device | str | None = None,
+    ) -> nn.Module:
+        """
+        Restore the weights of any architecture from a checkpoint.
+
+        Returns `model`, on `device` and in evaluation mode. Use
+        `load_checkpoint` to also read the stored theta or metadata.
+        """
+        Analyze.load_checkpoint(ckpt_path, model, device)
         return model
 
     @staticmethod
