@@ -1,4 +1,5 @@
 import os
+import random
 
 import torch
 import torch.nn as nn
@@ -7,6 +8,37 @@ import numpy as np
 import pandas as pd
 
 from .PINNs import ANN
+
+
+def seed_everything(seed: int, deterministic: bool = False) -> None:
+    """
+    Seed every random number generator a pinnse run draws from.
+
+    Inputs
+    ------
+    seed : int
+        Seed applied to Python's `random`, NumPy's global generator and
+        PyTorch (CPU and all CUDA devices).
+    deterministic : bool, optional, default=False
+        If True, also ask PyTorch to use deterministic algorithms (and cuDNN to
+        avoid non-deterministic kernels), at some cost in speed. If False,
+        PyTorch's defaults are restored.
+
+    Notes
+    -----
+    - `DataModule` and `Training` additionally take their own seeds
+      (`random_state`, `seed`); with `Training(seed=None)` the trainer derives
+      its seed from the one set here.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if deterministic:
+        # Required by cuBLAS for deterministic results on CUDA >= 10.2.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(deterministic)
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = False
 
 
 class Normalization:
