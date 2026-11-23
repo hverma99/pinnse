@@ -140,6 +140,27 @@ def test_verify_residuals_warns_when_independent_of_the_output(tmp_path):
         t.verify_residuals()
 
 
+def test_verify_residuals_accepts_a_residual_of_derivatives_only(tmp_path):
+    # dy/dx - 2x depends on the network only through the derivative of y, which
+    # autograd does not trace back to the tensor y itself.
+    def derivative_only(x, y):
+        dy = torch.autograd.grad(y, x, torch.ones_like(y), create_graph=True)[0]
+        return dy - 2.0 * x
+
+    t = make(tmp_path, phys_residual=derivative_only, bnd_weight=0.0)
+    t.verify_residuals()  # warnings are errors in the test suite
+
+
+def test_verify_residuals_with_a_frozen_network(tmp_path):
+    # Without trainable parameters the dependence is checked through y itself.
+    model = ANN([1, 8, 1], nn.Tanh).requires_grad_(False)
+    t = make(tmp_path, model=model, phys_residual=lambda x, y: y - x, bnd_weight=0.0)
+    t.verify_residuals()
+    t = make(tmp_path, model=model, phys_residual=lambda x, y: x * 0, bnd_weight=0.0)
+    with pytest.warns(UserWarning, match="does not depend on the network output"):
+        t.verify_residuals()
+
+
 def test_verify_residuals_leaves_model_mode_and_rng_unchanged(tmp_path):
     t = make(tmp_path)
     t.model.train()

@@ -127,7 +127,11 @@ torch = ["torch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=pinnse --cov-report=term-missing"
+addopts = "--cov=pinnse --cov-report=term-missing --strict-markers --strict-config"
+xfail_strict = true
+# A warning the test did not expect is an error: tests that exercise a warning
+# assert it with pytest.warns, so new or changed warnings cannot go unnoticed.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["pinnse"]

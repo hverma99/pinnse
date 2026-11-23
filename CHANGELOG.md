@@ -8,6 +8,11 @@ All notable changes to `pinnse` are documented here. The format follows
 
 ### Fixed
 
+- `Training.verify_residuals` warned that a residual "does not depend on the
+  network output" when the residual used only derivatives of the output, such
+  as `dy/dx - 2x`: autograd does not trace such a residual back to the output
+  tensor itself. The check now also looks for a dependence on the network's
+  trainable parameters.
 - Type annotations: `DataModule.phys_colloc_loader` takes `shuffle: bool` and
   `alpha: float` (`None` was never a valid value).
 
@@ -15,6 +20,7 @@ All notable changes to `pinnse` are documented here. The format follows
 
 - The package ships a `py.typed` marker, so type checkers use its annotations.
 - Static type checking with mypy (`nox -s typecheck`), run in CI.
+- The test suite fails on any warning it does not expect.
 
 ## [1.0.0] - 11/16/2026
 

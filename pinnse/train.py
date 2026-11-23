@@ -592,12 +592,19 @@ class Training(object):
                             "(check units, normalization and divisions); pass "
                             "check_residuals=False to skip this check."
                         )
-                    grad = (
-                        torch.autograd.grad(res.sum(), y, allow_unused=True)[0]
+                    # A residual built only from derivatives of the output, such
+                    # as dy/dx - f(x), reaches the network through its
+                    # parameters rather than through the tensor y itself.
+                    targets = [
+                        y,
+                        *(p for p in self.model.parameters() if p.requires_grad),
+                    ]
+                    grads = (
+                        torch.autograd.grad(res.sum(), targets, allow_unused=True)
                         if res.requires_grad
-                        else None
+                        else ()
                     )
-                    if grad is None:
+                    if all(g is None for g in grads):
                         warnings.warn(
                             f"{name} does not depend on the network output, so its "
                             "loss cannot train the model.",
