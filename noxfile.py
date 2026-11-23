@@ -118,6 +118,14 @@ def examples(session: nox.Session) -> None:
 
 
 @nox.session
+def typecheck(session: nox.Session) -> None:
+    """Type-check the package with mypy (configured in pyproject.toml)."""
+    session.install("torch", "--index-url", TORCH_CPU)
+    session.install("-e", ".", "mypy", "pandas-stubs", "scipy-stubs", "types-tqdm")
+    session.run("mypy", *session.posargs)
+
+
+@nox.session
 def build(session: nox.Session) -> None:
     """Build the sdist and wheel into dist/, validate them, and import the wheel."""
     session.install("build", "twine")

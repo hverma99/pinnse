@@ -4,6 +4,18 @@ All notable changes to `pinnse` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Type annotations: `DataModule.phys_colloc_loader` takes `shuffle: bool` and
+  `alpha: float` (`None` was never a valid value).
+
+### Added
+
+- The package ships a `py.typed` marker, so type checkers use its annotations.
+- Static type checking with mypy (`nox -s typecheck`), run in CI.
+
 ## [1.0.0] - 11/16/2026
 
 The first stable release. It fixes how checkpoints are selected and how

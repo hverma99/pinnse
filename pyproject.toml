@@ -68,7 +68,11 @@ dev = [
     "twine",
     "pytest",
     "pytest-cov",
-    "prek"
+    "prek",
+    "mypy",
+    "pandas-stubs",
+    "scipy-stubs",
+    "types-tqdm",
 ]
 
 [project.urls]
@@ -79,6 +83,26 @@ Changelog = "https://github.com/hverma99/pinnse/blob/main/CHANGELOG.md"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pinnse*"]
+
+[tool.setuptools.package-data]
+# PEP 561 marker: the package ships its own type hints.
+pinnse = ["py.typed"]
+
+[tool.mypy]
+files = ["pinnse"]
+python_version = "3.11"
+# Type-check the bodies of functions without annotations too, and flag code
+# that the checker proves can never run (often a sign of a wrong annotation).
+check_untyped_defs = true
+warn_unreachable = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+# scikit-learn ships no type hints.
+module = ["sklearn", "sklearn.*"]
+ignore_missing_imports = true
 
 [tool.ruff.lint]
 # Explicit rule set, so results do not change when Ruff changes its defaults.
