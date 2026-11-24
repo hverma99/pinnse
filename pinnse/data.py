@@ -1,4 +1,3 @@
-import numbers
 import warnings
 from typing import Optional
 
@@ -254,7 +253,7 @@ class DataModule:
         """
         in_cols = list(self.I_S_data.columns)
         explicit = simplex_groups is not None
-        if explicit:
+        if simplex_groups is not None:
             groups = [list(g) for g in simplex_groups]
         else:
             groups = [
@@ -266,6 +265,7 @@ class DataModule:
         resolved: list[list[str]] = []
         used: set[str] = set()
         for group in groups:
+            problem: Optional[str]
             unknown = [col for col in group if col not in in_cols]
             if unknown:
                 problem = f"unknown input columns {unknown}"
@@ -343,8 +343,8 @@ class DataModule:
 
     def phys_colloc_loader(
         self,
-        shuffle: Optional[bool] = True,
-        alpha: Optional[float] = 1.0,
+        shuffle: bool = True,
+        alpha: float = 1.0,
         drop_last: bool = False,
     ):
         """
@@ -563,12 +563,10 @@ class DataModule:
         if not X_all:
             raise ValueError("The provided DataLoader is empty.")
 
-        X_all = np.vstack(X_all)
-        df_X = pd.DataFrame(X_all, columns=self.I_S_data.columns)
+        df_X = pd.DataFrame(np.vstack(X_all), columns=self.I_S_data.columns)
 
         if Y_all:
-            Y_all = np.vstack(Y_all)
-            df_Y = pd.DataFrame(Y_all, columns=self.D_S_data.columns)
+            df_Y = pd.DataFrame(np.vstack(Y_all), columns=self.D_S_data.columns)
             df = pd.concat([df_X, df_Y], axis=1)
         else:
             df = df_X
@@ -650,7 +648,7 @@ class SequenceDataModule:
 
         if (
             isinstance(n_segments, bool)
-            or not isinstance(n_segments, numbers.Integral)
+            or not isinstance(n_segments, (int, np.integer))
             or n_segments < 1
         ):
             raise ValueError(

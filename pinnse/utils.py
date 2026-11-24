@@ -168,8 +168,8 @@ class Normalization:
         norm_D_S_metrics: dict = {}
 
         for in_cols, ot_cols in shared_groups or []:
-            vals = [I_S_data[in_cols], D_S_data[ot_cols]]
-            vals = [v.to_numpy(dtype=np.float64).ravel() for v in vals if v.size]
+            frames = [I_S_data[in_cols], D_S_data[ot_cols]]
+            vals = [v.to_numpy(dtype=np.float64).ravel() for v in frames if v.size]
             if not vals:
                 continue
             group = np.concatenate(vals)
@@ -937,6 +937,7 @@ class Noise:
             )
             values = data[col].to_numpy(dtype=np.float64)
 
+            sigma: float | np.ndarray
             if mode == "relative":
                 sigma = level * values.std()
             elif mode == "proportional":

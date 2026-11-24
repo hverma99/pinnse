@@ -25,7 +25,6 @@ other multi-objective strategy can be supplied without modifying this module.
 
 import logging
 import math
-import numbers
 import os
 import random
 import sys
@@ -115,7 +114,7 @@ def _progress_disabled(progress: Optional[bool]) -> bool:
 
 def _require_positive_int(value, name: str) -> int:
     """Return `value` as an int, rejecting non-integers and values below one."""
-    if isinstance(value, bool) or not isinstance(value, numbers.Integral) or value < 1:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
         raise ValueError(f"{name} must be a positive integer; received {value!r}.")
     return int(value)
 
@@ -161,14 +160,14 @@ class PCGrad(object):
         flat_grads = []
         for name in names:
             weight = weights.get(name, 1.0) if self.apply_weights else 1.0
-            grads = torch.autograd.grad(
+            raw = torch.autograd.grad(
                 weight * losses[name],
                 params,
                 retain_graph=True,
                 allow_unused=True,
             )
             grads = [
-                torch.zeros_like(p) if g is None else g for p, g in zip(params, grads)
+                torch.zeros_like(p) if g is None else g for p, g in zip(params, raw)
             ]
             flat_grads.append(torch.cat([g.reshape(-1) for g in grads]))
 
@@ -425,7 +424,7 @@ class Training(object):
 
     def _save_checkpoint(self):
         """Save the model state and, for inverse problems, the current theta."""
-        state = {"model_state_dict": self.model.state_dict()}
+        state: dict[str, object] = {"model_state_dict": self.model.state_dict()}
         if self.theta is not None:
             state["theta"] = self.theta.detach().cpu().clone()
         if self.metadata is not None:
@@ -593,12 +592,19 @@ class Training(object):
                             "(check units, normalization and divisions); pass "
                             "check_residuals=False to skip this check."
                         )
-                    grad = (
-                        torch.autograd.grad(res.sum(), y, allow_unused=True)[0]
+                    # A residual built only from derivatives of the output, such
+                    # as dy/dx - f(x), reaches the network through its
+                    # parameters rather than through the tensor y itself.
+                    targets = [
+                        y,
+                        *(p for p in self.model.parameters() if p.requires_grad),
+                    ]
+                    grads = (
+                        torch.autograd.grad(res.sum(), targets, allow_unused=True)
                         if res.requires_grad
-                        else None
+                        else ()
                     )
-                    if grad is None:
+                    if all(g is None for g in grads):
                         warnings.warn(
                             f"{name} does not depend on the network output, so its "
                             "loss cannot train the model.",
@@ -615,10 +621,10 @@ class Training(object):
 
     def grad_norm(self, loss):
         if loss is not None:
-            g_ = torch.autograd.grad(
+            raw = torch.autograd.grad(
                 loss, self.trainable_params, retain_graph=True, allow_unused=True
             )
-            g_ = [g for g in g_ if g is not None]
+            g_ = [g for g in raw if g is not None]
             norm = (
                 torch.norm(torch.stack([g.norm() for g in g_]))
                 if g_
@@ -1140,12 +1146,12 @@ class Training(object):
         self._verify_once()
 
         def gather_full_data(loader):
-            X, Y = [], []
+            xs, ys = [], []
             for x_batch, y_batch in loader:
-                X.append(x_batch)
-                Y.append(y_batch)
-            X = torch.cat(X, dim=0).to(self.device)
-            Y = torch.cat(Y, dim=0).to(self.device)
+                xs.append(x_batch)
+                ys.append(y_batch)
+            X = torch.cat(xs, dim=0).to(self.device)
+            Y = torch.cat(ys, dim=0).to(self.device)
             return X, Y
 
         def gather_full_colloc(batch_list):
@@ -1170,7 +1176,12 @@ class Training(object):
             line_search_fn="strong_wolfe",
         )
 
-        history_lbfgs = {"loss_t": [], "loss_d": [], "loss_p": [], "loss_b": []}
+        history_lbfgs: dict[str, list[float]] = {
+            "loss_t": [],
+            "loss_d": [],
+            "loss_p": [],
+            "loss_b": [],
+        }
         best_total = float("inf")
         weight = {"physics": self.phys_weight, "boundary": self.bnd_weight}
 

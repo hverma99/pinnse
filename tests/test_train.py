@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import math
 
@@ -80,6 +81,11 @@ def params_of(model):
     return [p.detach().clone() for p in model.parameters()]
 
 
+# A loss term with a non-zero weight but no residual or collocation data is
+# disabled, with a warning.
+TERM_DISABLED = r"but no \w+ was given, so this loss term is disabled"
+
+
 def mean_sq_residual(trainer, batches, fn):
     x = torch.cat(batches).requires_grad_(True)
     return torch.mean(fn(x, trainer.model(x)) ** 2).item()
@@ -160,15 +166,20 @@ def test_train_epoch_combines_weighted_losses(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    "overrides, warns",
     [
-        {"phys_weight": 0.0},
-        {"phys_residual": None},
-        {"phys_coll_loader": None},
+        ({"phys_weight": 0.0}, False),
+        ({"phys_residual": None}, True),
+        ({"phys_coll_loader": None}, True),
     ],
 )
-def test_train_epoch_skips_physics_when_disabled(tmp_path, overrides):
-    t = make_trainer(tmp_path, bnd=False, **overrides)
+def test_train_epoch_skips_physics_when_disabled(tmp_path, overrides, warns):
+    with (
+        pytest.warns(UserWarning, match=TERM_DISABLED)
+        if warns
+        else contextlib.nullcontext()
+    ):
+        t = make_trainer(tmp_path, bnd=False, **overrides)
     stats = t.train_epoch()
     assert stats["phys_loss"] == 0.0
     if t.phys_residual is not None:
@@ -437,7 +448,9 @@ def test_adaptive_weights_keep_weight_when_its_gradient_vanishes(tmp_path, vanis
     constant = {f"{vanishing}_residual": lambda x, y: x * 0 + 1}
     t = make_trainer(tmp_path, adapt_wts=True, **constant)
     t.wt_update_every = 1
-    h = t.adam_step(epochs=2, val_every=2, verbose=False)
+    kind = "physics" if vanishing == "phys" else "boundary"
+    with pytest.warns(UserWarning, match=f"The {kind} residual does not depend"):
+        h = t.adam_step(epochs=2, val_every=2, verbose=False)
 
     frozen, adapted = (
         ("wt_phys", "wt_bnd") if vanishing == "phys" else ("wt_bnd", "wt_phys")
@@ -748,16 +761,21 @@ def test_lbfgs_optimizes_and_restores_inverse_parameter(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "mode, kw",
+    "mode, kw, warns",
     [
-        ("overall physics", dict(phys=False, bnd=False)),  # no collocation data
-        ("physics", dict(phys_weight=0.0)),  # disabled by its weight
-        ("boundary", dict(bnd_residual=None)),  # no residual
+        ("overall physics", dict(phys=False, bnd=False), True),  # no colloc. data
+        ("physics", dict(phys_weight=0.0), False),  # disabled by its weight
+        ("boundary", dict(bnd_residual=None), True),  # no residual
     ],
 )
-def test_lbfgs_rejects_mode_without_active_term(tmp_path, mode, kw):
+def test_lbfgs_rejects_mode_without_active_term(tmp_path, mode, kw, warns):
     kw = {"phys_weight": 1.0, "bnd_weight": 1.0, **kw}
-    t = make_trainer(tmp_path, **kw)
+    with (
+        pytest.warns(UserWarning, match=TERM_DISABLED)
+        if warns
+        else contextlib.nullcontext()
+    ):
+        t = make_trainer(tmp_path, **kw)
     with pytest.raises(ValueError, match="no active loss term"):
         t.lbfgs_step(mode=mode, n_steps=2, verbose=False)
 
@@ -778,7 +796,10 @@ def test_lbfgs_non_finite_steps_keep_the_previous_checkpoint(tmp_path):
 
 
 def test_lbfgs_combined_without_collocation_data_uses_data_loss(tmp_path):
-    t = make_trainer(tmp_path, phys=False, bnd=False, phys_weight=1.0, bnd_weight=1.0)
+    with pytest.warns(UserWarning, match=TERM_DISABLED):
+        t = make_trainer(
+            tmp_path, phys=False, bnd=False, phys_weight=1.0, bnd_weight=1.0
+        )
     torch.save({"model_state_dict": t.model.state_dict()}, t.ckpt_path)
     h = t.lbfgs_step(mode="combined", n_steps=2, verbose=False)
     assert all(v > 0 for v in h["loss_d"])

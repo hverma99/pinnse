@@ -15,10 +15,10 @@ These architectures are designed to support flexible experimentation with
 different network structures while maintaining a common PyTorch-based interface.
 """
 
-import numbers
-
 import torch
 import torch.nn as nn
+
+import numpy as np
 
 from ._deprecation import warn_renamed
 
@@ -27,7 +27,7 @@ def _check_layer_size(layer_size) -> None:
     """Reject a layer list without input and output sizes, or with bad sizes."""
     sizes = list(layer_size)
     if len(sizes) < 2 or not all(
-        isinstance(n, numbers.Integral) and not isinstance(n, bool) and n >= 1
+        isinstance(n, (int, np.integer)) and not isinstance(n, bool) and n >= 1
         for n in sizes
     ):
         raise ValueError(
