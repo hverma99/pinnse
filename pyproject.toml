@@ -131,7 +131,15 @@ addopts = "--cov=pinnse --cov-report=term-missing --strict-markers --strict-conf
 xfail_strict = true
 # A warning the test did not expect is an error: tests that exercise a warning
 # assert it with pytest.warns, so new or changed warnings cannot go unnoticed.
-filterwarnings = ["error"]
+# The exceptions are warnings raised inside old versions of dependencies, seen
+# only with the minimum versions (`nox -s minimums`).
+filterwarnings = [
+    "error",
+    # matplotlib < 3.9 calls pyparsing APIs that pyparsing 3.3 deprecated.
+    "ignore:'\\w+' (argument is )?deprecated(, | - )use '\\w+':DeprecationWarning",
+    # torch 2.0's own torch.load(weights_only=True) uses TypedStorage (fixed in 2.1).
+    "ignore:TypedStorage is deprecated:UserWarning",
+]
 
 [tool.coverage.run]
 source = ["pinnse"]
